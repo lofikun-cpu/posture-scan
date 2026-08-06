@@ -1,0 +1,423 @@
+/* Unit tests for the POSTURE.SCAN analysis engine.
+   Landmarks are constructed from a *physical* layout so the same pose can be
+   rendered at any aspect ratio — which is how the aspect-correction is tested. */
+
+import {
+  LM, sevBucket, bodyRotation, checkQuality, analyseBackContour,
+  assessFront, assessSide, scoreOf, footProgression,
+  idealTargets, solveAffine, makeDisplacer
+} from '../posture.js';
+
+let pass = 0, fail = 0;
+const approx = (a, b, tol = 1e-6) => Math.abs(a - b) <= tol;
+function check(name, cond, extra = '') {
+  if (cond) { pass++; console.log(`  ✓ ${name}`); }
+  else { fail++; console.log(`  ✗ ${name} ${extra}`); }
+}
+function section(t) { console.log(`\n── ${t}`); }
+
+/* ---------- landmark factory ----------
+   `phys` is in units where image height = 1, x measured in the same units.
+   For an image of aspect A = W/H, normalised x = X_phys / A. */
+function buildLms(phys, A, vis = 1) {
+  const lms = Array.from({ length: 33 }, () => ({ x: 0.5 / A, y: 0.5, z: 0, visibility: 0.05 }));
+  for (const [idx, p] of Object.entries(phys)) {
+    lms[idx] = { x: p.x / A, y: p.y, z: 0, visibility: p.v ?? vis };
+  }
+  return lms;
+}
+function buildWorld(spec) {
+  const w = Array.from({ length: 33 }, () => ({ x: 0, y: 0, z: 0, visibility: 1 }));
+  for (const [idx, p] of Object.entries(spec)) w[idx] = { x: p.x, y: p.y ?? 0, z: p.z, visibility: 1 };
+  return w;
+}
+
+/* Squared-to-camera world hips + an anterior nose (front view). */
+const WORLD_FRONT = buildWorld({
+  [LM.leftHip]: { x: -0.1, z: 0 }, [LM.rightHip]: { x: 0.1, z: 0 },
+  [LM.nose]: { x: 0, z: 0.1 },
+  [LM.leftHeel]: { x: -0.08, z: 0 }, [LM.leftFoot]: { x: -0.08, z: 0.15 },
+  [LM.rightHeel]: { x: 0.08, z: 0 }, [LM.rightFoot]: { x: 0.08, z: 0.15 }
+});
+/* Profile world hips (one hip behind the other). */
+const WORLD_SIDE = buildWorld({
+  [LM.leftHip]: { x: 0, z: -0.1 }, [LM.rightHip]: { x: 0, z: 0.1 },
+  [LM.nose]: { x: 0.1, z: 0 }
+});
+
+/* ---------- a physically perfect frontal stance ---------- */
+function perfectFrontPhys() {
+  const cx = 0.28; // horizontal centre in height-units
+  return {
+    [LM.nose]:          { x: cx,        y: 0.10 },
+    [LM.leftEar]:       { x: cx + 0.02, y: 0.095 },
+    [LM.rightEar]:      { x: cx - 0.02, y: 0.095 },
+    [LM.leftShoulder]:  { x: cx + 0.065, y: 0.20 },
+    [LM.rightShoulder]: { x: cx - 0.065, y: 0.20 },
+    [LM.leftHip]:       { x: cx + 0.035, y: 0.50 },
+    [LM.rightHip]:      { x: cx - 0.035, y: 0.50 },
+    [LM.leftKnee]:      { x: cx + 0.0295, y: 0.72 },   // exactly on hip→ankle
+    [LM.rightKnee]:     { x: cx - 0.0295, y: 0.72 },
+    [LM.leftAnkle]:     { x: cx + 0.025, y: 0.92 },
+    [LM.rightAnkle]:    { x: cx - 0.025, y: 0.92 },
+    [LM.leftHeel]:      { x: cx + 0.025, y: 0.94 },
+    [LM.rightHeel]:     { x: cx - 0.025, y: 0.94 },
+    [LM.leftFoot]:      { x: cx + 0.025, y: 0.97 },
+    [LM.rightFoot]:     { x: cx - 0.025, y: 0.97 }
+  };
+}
+// knee exactly on the hip→ankle line: t = (0.72-0.50)/(0.92-0.50)
+{
+  const t = (0.72 - 0.50) / (0.92 - 0.50);
+  const kx = 0.035 + (0.025 - 0.035) * t;
+  const p = perfectFrontPhys();
+  p[LM.leftKnee].x = 0.28 + kx;
+  p[LM.rightKnee].x = 0.28 - kx;
+  perfectFrontPhys.exact = p;
+}
+
+function perfectSidePhys() {
+  const cx = 0.28;
+  return {
+    [LM.nose]:          { x: cx + 0.045, y: 0.10 },  // nose leads → facing +x
+    [LM.leftEar]:       { x: cx,         y: 0.095 },
+    [LM.rightEar]:      { x: cx,         y: 0.095, v: 0.3 },
+    [LM.leftShoulder]:  { x: cx,         y: 0.20 },
+    [LM.rightShoulder]: { x: cx,         y: 0.20, v: 0.3 },
+    [LM.leftHip]:       { x: cx,         y: 0.50 },
+    [LM.rightHip]:      { x: cx,         y: 0.50, v: 0.3 },
+    [LM.leftKnee]:      { x: cx,         y: 0.72 },
+    [LM.leftAnkle]:     { x: cx,         y: 0.92 }
+  };
+}
+
+const PORTRAIT = 1080 / 1920;   // 0.5625
+const LANDSCAPE = 1920 / 1080;  // 1.7778
+
+/* ============================================================ */
+section('Perfect posture scores 100');
+
+{
+  const lms = buildLms(perfectFrontPhys.exact, PORTRAIT);
+  const m = assessFront(lms, WORLD_FRONT, 1080, 1920);
+  const s = scoreOf(m);
+  check('front: perfect stance = 100', s === 100, `got ${s}`);
+  check('front: every metric OPTIMAL', m.every(x => sevBucket(x.severity) === 0),
+        m.filter(x => sevBucket(x.severity) !== 0).map(x => `${x.name}=${x.severity.toFixed(3)}`).join(','));
+  check('front: produces 6 checkpoints', m.length === 6, `got ${m.length}: ${m.map(x => x.name)}`);
+}
+{
+  const lms = buildLms(perfectSidePhys(), PORTRAIT);
+  const m = assessSide(lms, WORLD_SIDE, 1080, 1920, { kyphosis: 0.045, lordosis: 0.05 });
+  const s = scoreOf(m);
+  check('side: perfect stance = 100', s === 100, `got ${s}`);
+  check('side: every metric OPTIMAL', m.every(x => sevBucket(x.severity) === 0),
+        m.filter(x => sevBucket(x.severity) !== 0).map(x => `${x.name}=${x.severity.toFixed(3)}`).join(','));
+  check('side: produces 6 checkpoints with contour', m.length === 6, `got ${m.length}`);
+}
+
+/* ============================================================ */
+section('Aspect-ratio independence (the portrait-photo bug)');
+
+{
+  // Same physical pose, tilted shoulders, rendered portrait vs landscape.
+  const p = perfectFrontPhys.exact;
+  const tilted = JSON.parse(JSON.stringify(p));
+  tilted[LM.leftShoulder].y += 0.020;   // drop one shoulder
+  tilted[LM.rightShoulder].y -= 0.020;
+
+  const sp = scoreOf(assessFront(buildLms(tilted, PORTRAIT), WORLD_FRONT, 1080, 1920));
+  const sl = scoreOf(assessFront(buildLms(tilted, LANDSCAPE), WORLD_FRONT, 1920, 1080));
+  check('front: portrait and landscape agree', sp === sl, `portrait=${sp} landscape=${sl}`);
+
+  const q = perfectSidePhys();
+  q[LM.leftEar].x += 0.035;             // forward head
+  q[LM.nose].x += 0.035;
+  const tp = scoreOf(assessSide(buildLms(q, PORTRAIT), WORLD_SIDE, 1080, 1920, null));
+  const tl = scoreOf(assessSide(buildLms(q, LANDSCAPE), WORLD_SIDE, 1920, 1080, null));
+  check('side: portrait and landscape agree', tp === tl, `portrait=${tp} landscape=${tl}`);
+  check('side: forward head actually penalised', tp < 100, `got ${tp}`);
+}
+
+/* ============================================================ */
+section('Frontal metrics respond correctly');
+
+{
+  const base = perfectFrontPhys.exact;
+  const withShoulderTilt = (dy) => {
+    const p = JSON.parse(JSON.stringify(base));
+    p[LM.leftShoulder].y += dy; p[LM.rightShoulder].y -= dy;
+    return assessFront(buildLms(p, PORTRAIT), WORLD_FRONT, 1080, 1920)
+      .find(m => m.name === 'SHOULDER BALANCE');
+  };
+  // shoulders span 0.13 height-units; 9° tilt ⇒ Δy = 0.13*tan(9°) = 0.0206 total
+  const half = 0.13 * Math.tan(9 * Math.PI / 180) / 2;
+  const at9 = withShoulderTilt(half);
+  check('shoulder balance: 9° ⇒ severity ≈ 1.0', approx(at9.severity, 1.0, 0.03), `got ${at9.severity.toFixed(3)}`);
+  const at0 = withShoulderTilt(0);
+  check('shoulder balance: level ⇒ 0', approx(at0.severity, 0, 1e-9), `got ${at0.severity}`);
+  check('shoulder balance: monotonic', withShoulderTilt(half / 3).severity < at9.severity);
+
+  // hip drop
+  const ph = JSON.parse(JSON.stringify(base));
+  ph[LM.leftHip].y += 0.012; ph[LM.rightHip].y -= 0.012;
+  const hipM = assessFront(buildLms(ph, PORTRAIT), WORLD_FRONT, 1080, 1920).find(m => m.name === 'PELVIC LEVEL');
+  check('pelvic level: drop is detected', hipM.severity > 0.3, `got ${hipM.severity.toFixed(3)}`);
+
+  // knee valgus vs varus — sign must be right
+  const pv = JSON.parse(JSON.stringify(base));
+  pv[LM.leftKnee].x -= 0.02; pv[LM.rightKnee].x += 0.02;   // both knees toward midline
+  const valg = assessFront(buildLms(pv, PORTRAIT), WORLD_FRONT, 1080, 1920).find(m => /KNEE/.test(m.name));
+  check('knees inward ⇒ labelled VALGUS', valg.name === 'KNEE VALGUS', `got ${valg.name}`);
+  check('knee valgus: severity raised', valg.severity > 0.5, `got ${valg.severity.toFixed(3)}`);
+
+  const pw = JSON.parse(JSON.stringify(base));
+  pw[LM.leftKnee].x += 0.02; pw[LM.rightKnee].x -= 0.02;   // both knees outward
+  const varus = assessFront(buildLms(pw, PORTRAIT), WORLD_FRONT, 1080, 1920).find(m => /KNEE/.test(m.name));
+  check('knees outward ⇒ labelled VARUS', varus.name === 'KNEE VARUS', `got ${varus.name}`);
+
+  // trunk lean
+  const pl = JSON.parse(JSON.stringify(base));
+  for (const i of [LM.leftShoulder, LM.rightShoulder, LM.nose, LM.leftEar, LM.rightEar]) pl[i].x += 0.05;
+  const lean = assessFront(buildLms(pl, PORTRAIT), WORLD_FRONT, 1080, 1920).find(m => m.name === 'TRUNK LEAN');
+  check('trunk lean: detected', lean.severity > 0.7, `got ${lean.severity.toFixed(3)}`);
+}
+
+/* ============================================================ */
+section('Foot progression (forefoot abduction)');
+
+{
+  const vis = () => 1;
+  const straight = footProgression(WORLD_FRONT, LM.leftHeel, LM.leftFoot, vis);
+  check('feet pointing forward ⇒ ~0°', approx(straight, 0, 0.5), `got ${straight?.toFixed(2)}`);
+
+  const wOut = buildWorld({
+    [LM.leftHip]: { x: -0.1, z: 0 }, [LM.rightHip]: { x: 0.1, z: 0 },
+    [LM.nose]: { x: 0, z: 0.1 },
+    [LM.leftHeel]: { x: -0.08, z: 0 }, [LM.leftFoot]: { x: -0.18, z: 0.15 }
+  });
+  const out = footProgression(wOut, LM.leftHeel, LM.leftFoot, vis);
+  check('toe-out ⇒ ~33.7°', approx(out, 33.69, 0.5), `got ${out?.toFixed(2)}`);
+
+  // Whole-body rotation must NOT masquerade as toe-out: rotate hips, nose and
+  // feet together by 40° and the measured angle should be unchanged.
+  const rot = (p, a) => ({ x: p.x * Math.cos(a) - p.z * Math.sin(a), z: p.x * Math.sin(a) + p.z * Math.cos(a) });
+  const a = 40 * Math.PI / 180;
+  const wRot = buildWorld({
+    [LM.leftHip]: rot({ x: -0.1, z: 0 }, a), [LM.rightHip]: rot({ x: 0.1, z: 0 }, a),
+    [LM.nose]: rot({ x: 0, z: 0.1 }, a),
+    [LM.leftHeel]: rot({ x: -0.08, z: 0 }, a), [LM.leftFoot]: rot({ x: -0.18, z: 0.15 }, a)
+  });
+  const rotated = footProgression(wRot, LM.leftHeel, LM.leftFoot, vis);
+  check('body rotation does not inflate toe-out', approx(rotated, out, 0.01),
+        `upright=${out?.toFixed(2)} rotated=${rotated?.toFixed(2)}`);
+}
+
+/* ============================================================ */
+section('Sagittal metrics');
+
+{
+  const base = perfectSidePhys();
+  const fh = JSON.parse(JSON.stringify(base));
+  fh[LM.leftEar].x += 0.084;   // 0.28 torso × 0.28 threshold ⇒ severity 1.0
+  fh[LM.nose].x += 0.084;
+  const m1 = assessSide(buildLms(fh, PORTRAIT), WORLD_SIDE, 1080, 1920, null).find(m => m.name === 'FORWARD HEAD');
+  check('forward head: 0.28 of torso ⇒ severity ≈ 1', approx(m1.severity, 1.0, 0.02), `got ${m1.severity.toFixed(3)}`);
+
+  const rs = JSON.parse(JSON.stringify(base));
+  for (const i of [LM.leftShoulder, LM.leftEar, LM.nose]) rs[i].x += 0.03;
+  const m2 = assessSide(buildLms(rs, PORTRAIT), WORLD_SIDE, 1080, 1920, null)
+    .find(m => m.name === 'SHOULDER PROTRACTION');
+  check('shoulder protraction: detected', m2.severity > 0.4, `got ${m2.severity.toFixed(3)}`);
+
+  // Posture leaning BACKWARD must not be scored as forward head.
+  const back = JSON.parse(JSON.stringify(base));
+  back[LM.leftEar].x -= 0.05;
+  const m3 = assessSide(buildLms(back, PORTRAIT), WORLD_SIDE, 1080, 1920, null).find(m => m.name === 'FORWARD HEAD');
+  check('ear behind shoulder ⇒ forward head stays 0', m3.severity === 0, `got ${m3.severity}`);
+
+  // Facing the other way must give identical results (mirror invariance).
+  const mirrored = {};
+  for (const [k, v] of Object.entries(fh)) mirrored[k] = { ...v, x: 0.56 - v.x };
+  const worldMirror = buildWorld({
+    [LM.leftHip]: { x: 0, z: -0.1 }, [LM.rightHip]: { x: 0, z: 0.1 }, [LM.nose]: { x: -0.1, z: 0 }
+  });
+  const m4 = assessSide(buildLms(mirrored, PORTRAIT), worldMirror, 1080, 1920, null)
+    .find(m => m.name === 'FORWARD HEAD');
+  check('mirror invariance: same forward-head severity', approx(m4.severity, m1.severity, 0.02),
+        `orig=${m1.severity.toFixed(3)} mirrored=${m4.severity.toFixed(3)}`);
+
+  // sway back
+  const sw = JSON.parse(JSON.stringify(base));
+  for (const i of [LM.leftHip, LM.leftShoulder, LM.leftEar, LM.nose]) sw[i].x += 0.05;
+  sw[LM.leftShoulder].x -= 0.05; sw[LM.leftEar].x -= 0.05; sw[LM.nose].x -= 0.05;
+  const m5 = assessSide(buildLms(sw, PORTRAIT), WORLD_SIDE, 1080, 1920, null)
+    .find(m => m.name === 'PELVIS OVER BASE');
+  check('sway back: hips ahead of ankles detected', m5.severity > 0.8, `got ${m5.severity.toFixed(3)}`);
+}
+
+/* ============================================================ */
+section('Quality gating (3D rotation)');
+
+{
+  check('bodyRotation: square hips ⇒ 0°', approx(bodyRotation(WORLD_FRONT), 0, 0.01));
+  check('bodyRotation: profile hips ⇒ 90°', approx(bodyRotation(WORLD_SIDE), 90, 0.01));
+
+  const lmsF = buildLms(perfectFrontPhys.exact, PORTRAIT);
+  check('front photo, square ⇒ accepted', checkQuality(lmsF, WORLD_FRONT, 'front').ok);
+  check('front photo, profile ⇒ rejected', !checkQuality(lmsF, WORLD_SIDE, 'front').ok);
+
+  const w45 = buildWorld({
+    [LM.leftHip]: { x: -0.0707, z: -0.0707 }, [LM.rightHip]: { x: 0.0707, z: 0.0707 },
+    [LM.nose]: { x: 0, z: 0.1 }
+  });
+  const r45 = checkQuality(lmsF, w45, 'front');
+  check('front photo, 45° turned ⇒ rejected', !r45.ok, JSON.stringify(r45));
+  check('rejection message names the angle', /45°/.test(r45.msg || ''), r45.msg);
+
+  check('side photo, profile ⇒ accepted', checkQuality(lmsF, WORLD_SIDE, 'side').ok);
+  check('side photo, square ⇒ rejected', !checkQuality(lmsF, WORLD_FRONT, 'side').ok);
+
+  // missing torso
+  const noTorso = buildLms(perfectFrontPhys.exact, PORTRAIT);
+  noTorso[LM.leftHip].visibility = 0.1;
+  check('missing torso ⇒ rejected', !checkQuality(noTorso, WORLD_FRONT, 'front').ok);
+
+  // missing feet ⇒ accepted but warned
+  const noFeet = buildLms(perfectFrontPhys.exact, PORTRAIT);
+  noFeet[LM.leftAnkle].visibility = 0.1; noFeet[LM.rightAnkle].visibility = 0.1;
+  const nf = checkQuality(noFeet, WORLD_FRONT, 'front');
+  check('missing feet ⇒ accepted with warning', nf.ok && !!nf.warn, JSON.stringify(nf));
+}
+
+/* ============================================================ */
+section('Back-contour curvature from the segmentation mask');
+
+{
+  const mw = 100, mh = 200;
+  const data = new Uint8Array(mw * mh);
+  const shY = 50, hipY = 150;           // matches lms below
+  const edgeAt = (y) => {
+    const frac = (y - shY) / (hipY - shY);
+    let e = 40;                          // straight chord baseline
+    if (frac > 0.2 && frac < 0.6) e = 40 - 10 * Math.sin((frac - 0.2) / 0.4 * Math.PI);  // kyphotic bulge
+    if (frac > 0.65) e = 40 + 8 * Math.sin((frac - 0.65) / 0.35 * Math.PI);              // lordotic hollow
+    return Math.round(e);
+  };
+  for (let y = 0; y < mh; y++) {
+    const e = (y >= shY && y <= hipY) ? edgeAt(y) : 40;
+    for (let x = e; x < 90; x++) data[y * mw + x] = 255;
+  }
+  const lms = Array.from({ length: 33 }, () => ({ x: 0.5, y: 0.5, visibility: 1 }));
+  lms[LM.leftShoulder] = { x: 0.5, y: shY / mh, visibility: 1 };
+  lms[LM.rightShoulder] = { x: 0.5, y: shY / mh, visibility: 1 };
+  lms[LM.leftHip] = { x: 0.5, y: hipY / mh, visibility: 1 };
+  lms[LM.rightHip] = { x: 0.5, y: hipY / mh, visibility: 1 };
+
+  const c = analyseBackContour(data, mw, mh, lms, true);
+  check('contour: returns a result', !!c, String(c));
+  check('contour: kyphosis ≈ 0.10', c && approx(c.kyphosis, 0.10, 0.012), `got ${c && c.kyphosis.toFixed(4)}`);
+  check('contour: lordosis ≈ 0.08', c && approx(c.lordosis, 0.08, 0.012), `got ${c && c.lordosis.toFixed(4)}`);
+
+  // A perfectly flat back should report ~no curvature.
+  const flat = new Uint8Array(mw * mh);
+  for (let y = 0; y < mh; y++) for (let x = 40; x < 90; x++) flat[y * mw + x] = 255;
+  const cf = analyseBackContour(flat, mw, mh, lms, true);
+  check('contour: flat back ⇒ ~0 curvature', cf && cf.kyphosis < 0.005 && cf.lordosis < 0.005, JSON.stringify(cf));
+
+  // Facing the other way must mirror cleanly.
+  const mir = new Uint8Array(mw * mh);
+  for (let y = 0; y < mh; y++) {
+    const e = (y >= shY && y <= hipY) ? edgeAt(y) : 40;
+    for (let x = mw - 90; x < mw - e; x++) mir[y * mw + x] = 255;
+  }
+  const cm = analyseBackContour(mir, mw, mh, lms, false);
+  check('contour: mirror invariance', cm && approx(cm.kyphosis, c.kyphosis, 0.02) && approx(cm.lordosis, c.lordosis, 0.02),
+        JSON.stringify(cm));
+
+  // Empty mask must not throw or invent numbers.
+  const empty = new Uint8Array(mw * mh);
+  check('contour: empty mask ⇒ null', analyseBackContour(empty, mw, mh, lms, true) === null);
+
+  // Interference (outstretched arm, bag, chair) must be rejected, not scored.
+  const armOut = new Uint8Array(mw * mh);
+  for (let y = 0; y < mh; y++) {
+    const e = (y >= shY && y <= shY + 25) ? 2 : 40;  // arm juts far out up top
+    for (let x = e; x < 90; x++) armOut[y * mw + x] = 255;
+  }
+  check('contour: arm-contaminated silhouette ⇒ null',
+        analyseBackContour(armOut, mw, mh, lms, true) === null,
+        JSON.stringify(analyseBackContour(armOut, mw, mh, lms, true)));
+
+  // Single-row speckle must not become a spike in the result.
+  const speckle = new Uint8Array(mw * mh);
+  for (let y = 0; y < mh; y++) {
+    const e = (y >= shY && y <= hipY) ? edgeAt(y) : 40;
+    for (let x = e; x < 90; x++) speckle[y * mw + x] = 255;
+  }
+  speckle[(shY + 30) * mw + 5] = 255;   // one stray pixel far out
+  const cs = analyseBackContour(speckle, mw, mh, lms, true);
+  check('contour: single stray pixel is filtered out',
+        cs && approx(cs.kyphosis, c.kyphosis, 0.015), `clean=${c.kyphosis.toFixed(4)} speckled=${cs && cs.kyphosis.toFixed(4)}`);
+}
+
+/* ============================================================ */
+section('Alignment simulation geometry');
+
+{
+  const W = 1080, H = 1920;
+  const lms = buildLms(perfectSidePhys(), PORTRAIT);
+  const fh = JSON.parse(JSON.stringify(perfectSidePhys()));
+  fh[LM.leftEar].x += 0.08; fh[LM.nose].x += 0.08;
+  const bad = buildLms(fh, PORTRAIT);
+
+  const t0 = idealTargets(lms, 'side', W, H);
+  check('warp: perfect side pose ⇒ ~no displacement',
+        t0.every(p => Math.abs(p.dx - p.sx) < 1e-6), JSON.stringify(t0.slice(0, 2)));
+
+  const t1 = idealTargets(bad, 'side', W, H);
+  const earPt = t1.find(p => approx(p.sx, bad[LM.leftEar].x * W, 1));
+  check('warp: forward head is pulled back', earPt && earPt.dx < earPt.sx,
+        earPt && `sx=${earPt.sx.toFixed(1)} dx=${earPt.dx.toFixed(1)}`);
+  check('warp: 85% of the way to plumb, not 100%',
+        earPt && earPt.dx > bad[LM.leftAnkle].x * W,
+        earPt && `dx=${earPt.dx.toFixed(1)} anchor=${(bad[LM.leftAnkle].x * W).toFixed(1)}`);
+
+  // affine solver
+  const m = solveAffine({ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0, y: 1 },
+                        { x: 0, y: 0 }, { x: 2, y: 0 }, { x: 0, y: 2 });
+  check('affine: 2× scale solves exactly',
+        m && approx(m[0], 2) && approx(m[3], 2) && approx(m[1], 0) && approx(m[2], 0)
+          && approx(m[4], 0) && approx(m[5], 0), JSON.stringify(m));
+  const deg2 = solveAffine({ x: 0, y: 0 }, { x: 1, y: 1 }, { x: 2, y: 2 },
+                           { x: 0, y: 0 }, { x: 1, y: 1 }, { x: 2, y: 2 });
+  check('affine: degenerate triangle ⇒ null', deg2 === null, JSON.stringify(deg2));
+
+  // displacement field
+  const disp = makeDisplacer([{ sx: 500, sy: 900, dx: 400, dy: 900 }], W, H);
+  const near = disp(500, 900), corner = disp(0, 0), far = disp(1070, 20);
+  check('displacer: moves toward the control point', near.x < 500, `got ${near.x.toFixed(1)}`);
+  check('displacer: image corners stay pinned',
+        Math.abs(corner.x) < 1 && Math.abs(corner.y) < 1, `got ${corner.x.toFixed(2)},${corner.y.toFixed(2)}`);
+  check('displacer: falls off with distance',
+        Math.abs(far.x - 1070) < Math.abs(near.x - 500),
+        `far=${Math.abs(far.x - 1070).toFixed(2)} near=${Math.abs(near.x - 500).toFixed(2)}`);
+  check('displacer: no NaN', Number.isFinite(near.x) && Number.isFinite(near.y));
+}
+
+/* ============================================================ */
+section('Scoring behaviour');
+
+{
+  check('empty metric list ⇒ 0', scoreOf([]) === 0);
+  const allBad = [{ severity: 1, weight: 1 }, { severity: 1, weight: 2 }];
+  check('all-severe ⇒ floor of 8 or below-mid', scoreOf(allBad) <= 10, `got ${scoreOf(allBad)}`);
+  const allGood = [{ severity: 0, weight: 1 }, { severity: 0, weight: 2 }];
+  check('all-optimal ⇒ 100', scoreOf(allGood) === 100, `got ${scoreOf(allGood)}`);
+  const mixed = scoreOf([{ severity: 0.5, weight: 1 }]);
+  check('mid severity lands in the shareable band (40-70)', mixed > 40 && mixed < 70, `got ${mixed}`);
+  check('severity buckets', sevBucket(0) === 0 && sevBucket(0.3) === 1 && sevBucket(0.5) === 2 && sevBucket(0.9) === 3);
+}
+
+console.log(`\n${'═'.repeat(46)}\n  ${pass} passed, ${fail} failed\n${'═'.repeat(46)}`);
+process.exit(fail ? 1 : 0);

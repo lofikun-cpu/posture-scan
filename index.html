@@ -4,12 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>POSTURE.SCAN — AI Posture Analysis</title>
-<meta name="description" content="Scan your posture with AI in 10 seconds. Get your Posture Score out of 100 — powered by KinaPT.">
+<meta name="description" content="Scan your posture with AI in 30 seconds. Front and side analysis, graded out of 100 — powered by KinaPT.">
 <meta property="og:title" content="POSTURE.SCAN — What's your Posture Score?">
-<meta property="og:description" content="AI scans your posture like Jarvis scans Iron Man. Get your alignment score out of 100 — free, in 10 seconds.">
+<meta property="og:description" content="AI scans your posture like Jarvis scans Iron Man. Get your alignment score out of 100 — free, on your phone.">
 <meta property="og:image" content="https://lofikun-cpu.github.io/posture-scan/assets/og-card.png">
-<meta name="twitter:card" content="summary_large_image">
 <meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='40' fill='none' stroke='%2321e6ff' stroke-width='8'/%3E%3Ccircle cx='50' cy='50' r='14' fill='%2321e6ff'/%3E%3C/svg%3E">
 <style>
   :root {
@@ -32,11 +32,7 @@
     overflow-x: hidden;
     -webkit-tap-highlight-color: transparent;
   }
-  #bg-canvas {
-    position: fixed; inset: 0; z-index: 0;
-    width: 100vw; height: 100vh;
-  }
-  .mono { font-family: 'Consolas', 'SF Mono', 'Courier New', monospace; }
+  #bg-canvas { position: fixed; inset: 0; z-index: 0; width: 100vw; height: 100vh; }
 
   #app {
     position: relative; z-index: 1;
@@ -46,7 +42,6 @@
     padding: 16px 16px 32px;
   }
 
-  /* ---------- header ---------- */
   header {
     display: flex; align-items: center; justify-content: space-between;
     padding: 8px 4px 14px;
@@ -63,18 +58,9 @@
     padding: 6px 10px; border-radius: 4px; cursor: pointer;
   }
 
-  /* ---------- panels ---------- */
-  .panel {
-    display: none;
-    flex: 1;
-    flex-direction: column;
-    animation: panelIn 0.45s ease both;
-  }
+  .panel { display: none; flex: 1; flex-direction: column; animation: panelIn 0.45s ease both; }
   .panel.active { display: flex; }
-  @keyframes panelIn {
-    from { opacity: 0; transform: translateY(14px); }
-    to { opacity: 1; transform: none; }
-  }
+  @keyframes panelIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 
   .hud-frame {
     position: relative;
@@ -85,8 +71,7 @@
     box-shadow: 0 0 40px rgba(33, 230, 255, 0.06), inset 0 0 60px rgba(33, 230, 255, 0.03);
   }
   .hud-frame::before, .hud-frame::after {
-    content: ''; position: absolute; width: 18px; height: 18px;
-    border: 2px solid var(--cyan);
+    content: ''; position: absolute; width: 18px; height: 18px; border: 2px solid var(--cyan);
   }
   .hud-frame::before { top: -2px; left: -2px; border-right: none; border-bottom: none; border-radius: 8px 0 0 0; }
   .hud-frame::after { bottom: -2px; right: -2px; border-left: none; border-top: none; border-radius: 0 0 8px 0; }
@@ -95,22 +80,16 @@
     font-family: monospace; font-size: 10px; letter-spacing: 2.5px;
     color: var(--cyan); opacity: 0.75; margin-bottom: 10px;
   }
-  h1 {
-    font-size: 26px; font-weight: 600; letter-spacing: 0.5px;
-    color: #fff; margin-bottom: 6px; line-height: 1.25;
-  }
+  h1 { font-size: 26px; font-weight: 600; letter-spacing: 0.5px; color: #fff; margin-bottom: 6px; line-height: 1.25; }
   h1 .accent { color: var(--cyan); text-shadow: 0 0 16px var(--cyan-dim); }
 
-  /* ---------- jarvis console ---------- */
   #console {
     font-family: monospace; font-size: 13.5px; line-height: 1.75;
-    color: var(--text); min-height: 96px; margin: 16px 0;
-    white-space: pre-wrap;
+    color: var(--text); min-height: 96px; margin: 16px 0; white-space: pre-wrap;
   }
   #console .cursor {
-    display: inline-block; width: 8px; height: 15px;
-    background: var(--cyan); vertical-align: text-bottom;
-    animation: blink 0.9s steps(1) infinite;
+    display: inline-block; width: 8px; height: 15px; background: var(--cyan);
+    vertical-align: text-bottom; animation: blink 0.9s steps(1) infinite;
   }
   @keyframes blink { 50% { opacity: 0; } }
 
@@ -126,17 +105,14 @@
     width: 20px; height: 20px; text-align: center; line-height: 19px;
   }
 
-  /* ---------- buttons ---------- */
   .btn {
     display: block; width: 100%;
     background: linear-gradient(180deg, rgba(33,230,255,0.16), rgba(33,230,255,0.05));
-    border: 1px solid var(--cyan);
-    color: var(--cyan);
+    border: 1px solid var(--cyan); color: var(--cyan);
     font-family: monospace; font-size: 15px; letter-spacing: 3px;
     padding: 16px; border-radius: 6px; cursor: pointer;
     text-transform: uppercase; text-align: center;
-    transition: all 0.2s; position: relative; overflow: hidden;
-    text-decoration: none;
+    transition: all 0.2s; position: relative; overflow: hidden; text-decoration: none;
   }
   .btn:active { transform: scale(0.98); }
   .btn:disabled { opacity: 0.45; pointer-events: none; }
@@ -159,11 +135,20 @@
   }
   .privacy-note b { color: var(--green); }
 
+  /* ---------- progress dots ---------- */
+  #steps { display: flex; gap: 8px; justify-content: center; margin-bottom: 14px; }
+  .step-dot {
+    font-family: monospace; font-size: 9px; letter-spacing: 1.5px;
+    color: #33566b; border: 1px solid rgba(33,230,255,0.15);
+    padding: 5px 10px; border-radius: 3px;
+  }
+  .step-dot.done { color: var(--green); border-color: rgba(61,255,160,0.4); }
+  .step-dot.current { color: var(--cyan); border-color: var(--cyan); background: var(--cyan-faint); }
+
   /* ---------- capture ---------- */
   #video-wrap, #img-wrap {
     position: relative; border-radius: 8px; overflow: hidden;
-    border: 1px solid var(--cyan-dim); background: #000;
-    margin: 14px 0;
+    border: 1px solid var(--cyan-dim); background: #000; margin: 14px 0;
   }
   #cam-video { width: 100%; display: block; transform: scaleX(-1); }
   #scan-canvas { width: 100%; display: block; }
@@ -173,6 +158,26 @@
     font-family: monospace; font-size: 90px; color: var(--cyan);
     text-shadow: 0 0 40px var(--cyan); background: rgba(4,8,15,0.35);
   }
+  /* silhouette guide overlay */
+  #pose-guide {
+    position: absolute; inset: 0; pointer-events: none;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #pose-guide svg { height: 92%; opacity: 0.5; }
+
+  .thumbs { display: flex; gap: 10px; margin: 12px 0 0; }
+  .thumb {
+    flex: 1; border: 1px solid rgba(33,230,255,0.2); border-radius: 6px;
+    overflow: hidden; position: relative; background: #000; min-height: 78px;
+  }
+  .thumb img { width: 100%; display: block; opacity: 0.75; }
+  .thumb .tag {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    font-family: monospace; font-size: 9px; letter-spacing: 1.5px;
+    background: rgba(4,8,15,0.85); color: var(--cyan); padding: 4px; text-align: center;
+  }
+  .thumb.empty { display: flex; align-items: center; justify-content: center;
+    font-family: monospace; font-size: 10px; color: #33566b; letter-spacing: 1px; }
 
   /* ---------- analysis readout ---------- */
   #metrics { margin: 14px 0 4px; }
@@ -180,30 +185,30 @@
     display: flex; align-items: center; justify-content: space-between;
     font-family: monospace; font-size: 12px;
     padding: 9px 2px; border-bottom: 1px solid rgba(33,230,255,0.1);
-    opacity: 0; transform: translateX(-8px);
-    transition: all 0.35s ease;
+    opacity: 0; transform: translateX(-8px); transition: all 0.35s ease;
   }
   .metric-row.show { opacity: 1; transform: none; }
   .metric-name { color: #a8d8e8; letter-spacing: 1px; }
-  .metric-badge {
-    font-size: 10px; letter-spacing: 1.5px; padding: 3px 9px;
-    border-radius: 3px; border: 1px solid;
-  }
+  .metric-badge { font-size: 10px; letter-spacing: 1.5px; padding: 3px 9px; border-radius: 3px; border: 1px solid; }
   .sev-0 { color: var(--green); border-color: var(--green); background: rgba(61,255,160,0.08); }
   .sev-1 { color: var(--cyan); border-color: var(--cyan); background: var(--cyan-faint); }
   .sev-2 { color: var(--orange); border-color: var(--orange); background: rgba(255,179,71,0.08); }
   .sev-3 { color: var(--red); border-color: var(--red); background: rgba(255,77,94,0.08); }
 
+  .plane-head {
+    font-family: monospace; font-size: 10px; letter-spacing: 2px;
+    color: var(--cyan); opacity: 0.8; margin: 16px 0 4px; padding-top: 10px;
+    border-top: 1px solid rgba(33,230,255,0.15);
+  }
+  .plane-head span { float: right; color: #fff; opacity: 0.9; }
+
   #scan-status {
     font-family: monospace; font-size: 11px; color: var(--cyan);
-    letter-spacing: 2px; text-align: center; margin-top: 10px;
-    min-height: 16px;
+    letter-spacing: 2px; text-align: center; margin-top: 10px; min-height: 16px;
   }
 
   /* ---------- score ---------- */
-  #score-ring-wrap {
-    display: flex; justify-content: center; margin: 10px 0 6px;
-  }
+  #score-ring-wrap { display: flex; justify-content: center; margin: 10px 0 6px; }
   #score-ring { width: 220px; height: 220px; }
   .ring-bg { fill: none; stroke: rgba(33,230,255,0.12); stroke-width: 10; }
   .ring-fg {
@@ -212,20 +217,54 @@
     transform: rotate(-90deg); transform-origin: center;
     transition: stroke-dashoffset 2s cubic-bezier(0.22, 1, 0.36, 1), stroke 0.5s;
   }
-  #score-num {
-    font-family: monospace; font-size: 58px; fill: #fff; font-weight: 700;
-  }
+  #score-num { font-family: monospace; font-size: 58px; fill: #fff; font-weight: 700; }
   #score-outof { font-family: monospace; font-size: 13px; fill: #6da8bd; letter-spacing: 2px; }
-  #verdict {
-    text-align: center; font-size: 17px; color: #fff;
-    margin: 6px 0 4px; font-weight: 600; letter-spacing: 0.5px;
+  #verdict { text-align: center; font-size: 17px; color: #fff; margin: 6px 0 4px; font-weight: 600; letter-spacing: 0.5px; }
+  #verdict-sub { text-align: center; font-family: monospace; font-size: 12px; color: #7fb8cc; margin-bottom: 10px; line-height: 1.6; padding: 0 8px; }
+
+  #subscores { display: flex; gap: 10px; margin: 4px 0 8px; }
+  .subscore {
+    flex: 1; text-align: center; border: 1px solid rgba(33,230,255,0.2);
+    border-radius: 6px; padding: 10px 6px;
   }
-  #verdict-sub {
-    text-align: center; font-family: monospace; font-size: 12px;
-    color: #7fb8cc; margin-bottom: 16px; line-height: 1.6; padding: 0 8px;
+  .subscore .lbl { font-family: monospace; font-size: 9px; letter-spacing: 2px; color: #6da8bd; }
+  .subscore .val { font-family: monospace; font-size: 26px; color: #fff; font-weight: 700; line-height: 1.3; }
+
+  /* ---------- before/after slider ---------- */
+  #slider-box { margin: 18px 0 6px; }
+  #slider-wrap {
+    position: relative; border-radius: 8px; overflow: hidden;
+    border: 1px solid var(--cyan-dim); background: #000; touch-action: none;
+  }
+  #slider-wrap canvas { width: 100%; display: block; }
+  #after-layer { position: absolute; inset: 0; }
+  #after-layer canvas { width: 100%; height: 100%; }
+  #slider-handle {
+    position: absolute; top: 0; bottom: 0; width: 2px; background: var(--cyan);
+    box-shadow: 0 0 12px var(--cyan); pointer-events: none;
+  }
+  #slider-handle::after {
+    content: '◄ ►'; position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    font-family: monospace; font-size: 11px; color: var(--bg);
+    background: var(--cyan); padding: 6px 8px; border-radius: 20px; white-space: nowrap;
+  }
+  .slider-tag {
+    position: absolute; top: 10px; font-family: monospace; font-size: 10px;
+    letter-spacing: 2px; padding: 4px 8px; border-radius: 3px;
+    background: rgba(4,8,15,0.8); pointer-events: none;
+  }
+  .slider-tag.l { left: 10px; color: var(--orange); border: 1px solid rgba(255,179,71,0.4); }
+  .slider-tag.r { right: 10px; color: var(--green); border: 1px solid rgba(61,255,160,0.4); }
+  #slider-range {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    opacity: 0; cursor: ew-resize; margin: 0;
+  }
+  .sim-note {
+    font-family: monospace; font-size: 9.5px; color: #4d7d90;
+    text-align: center; margin-top: 8px; letter-spacing: 0.5px; line-height: 1.5;
   }
 
-  /* ---------- CTA ---------- */
   .cta-box {
     border: 1px solid rgba(255,179,71,0.4); border-radius: 8px;
     background: linear-gradient(180deg, rgba(255,179,71,0.07), transparent);
@@ -234,17 +273,18 @@
   .cta-box .sys-label { color: var(--orange); }
   .cta-box p { font-size: 13.5px; color: #ffd9a8; line-height: 1.6; margin-bottom: 14px; }
 
-  footer {
-    text-align: center; font-family: monospace; font-size: 10px;
-    color: #33566b; padding-top: 24px; letter-spacing: 1px;
-  }
-  footer a { color: #4d7d90; }
+  footer { text-align: center; font-family: monospace; font-size: 10px; color: #33566b; padding-top: 24px; letter-spacing: 1px; line-height: 1.7; }
 
   .hidden { display: none !important; }
   #err-box {
     font-family: monospace; font-size: 12px; color: var(--red);
     border: 1px solid rgba(255,77,94,0.4); border-radius: 6px;
     padding: 12px; margin: 12px 0; display: none; line-height: 1.6;
+  }
+  #warn-box {
+    font-family: monospace; font-size: 11.5px; color: var(--orange);
+    border: 1px solid rgba(255,179,71,0.4); border-radius: 6px;
+    padding: 10px 12px; margin: 12px 0; display: none; line-height: 1.6;
   }
 </style>
 </head>
@@ -260,28 +300,36 @@
   <!-- STEP 1 · GREETING -->
   <section class="panel active" id="panel-greet">
     <div class="hud-frame">
-      <div class="sys-label">▸ SYSTEM ONLINE · POSTURE ANALYSIS MODULE v2.1</div>
+      <div class="sys-label">▸ SYSTEM ONLINE · POSTURE ANALYSIS MODULE v3.0</div>
       <h1>How good is <span class="accent">your posture?</span></h1>
       <div id="console" aria-live="polite"><span class="cursor"></span></div>
       <ul class="instructions">
-        <li data-n="1">Stand 2–3 steps from the camera — head to hips visible</li>
-        <li data-n="2">Face the camera, OR turn 90° for a side-profile scan</li>
-        <li data-n="3">Stand how you <i>normally</i> stand. No cheating.</li>
-        <li data-n="4">Receive your Posture Score out of 100</li>
+        <li data-n="1">You'll take <b>two photos</b> — one facing me, one side-on</li>
+        <li data-n="2">Stand 2–3 steps back so I can see <b>head to feet</b></li>
+        <li data-n="3"><b>Barefoot</b>, in fitted clothing — loose clothes hide your spine</li>
+        <li data-n="4">Stand how you <i>normally</i> stand. No cheating.</li>
       </ul>
       <button class="btn" id="btn-start">◈ Initiate Scan</button>
-      <div class="privacy-note"><b>●</b> 100% ON-DEVICE AI — YOUR PHOTO NEVER LEAVES YOUR PHONE</div>
+      <div class="privacy-note"><b>●</b> 100% ON-DEVICE AI — YOUR PHOTOS NEVER LEAVE YOUR PHONE</div>
     </div>
   </section>
 
-  <!-- STEP 2 · CAPTURE -->
+  <!-- STEP 2 · CAPTURE (reused for front + side) -->
   <section class="panel" id="panel-capture">
     <div class="hud-frame">
-      <div class="sys-label">▸ STEP 02 · IMAGE ACQUISITION</div>
-      <h1>Acquire <span class="accent">target</span></h1>
+      <div id="steps">
+        <div class="step-dot" id="dot-front">01 · FRONT</div>
+        <div class="step-dot" id="dot-side">02 · SIDE</div>
+        <div class="step-dot" id="dot-result">03 · RESULT</div>
+      </div>
+      <div class="sys-label" id="capture-label">▸ VIEW 01 · FRONTAL PLANE</div>
+      <h1 id="capture-title">Face me, <span class="accent">feet together</span></h1>
+      <div id="capture-hint" style="font-family:monospace;font-size:12px;color:#7fb8cc;line-height:1.6;margin-top:8px"></div>
       <div id="err-box"></div>
+      <div id="warn-box"></div>
       <div id="video-wrap" class="hidden">
         <video id="cam-video" autoplay playsinline muted></video>
+        <div id="pose-guide"></div>
         <div id="countdown">3</div>
       </div>
       <div class="btn-row" id="capture-choices">
@@ -291,6 +339,10 @@
       <button class="btn hidden" id="btn-snap" style="margin-top:12px">◉ Capture in 3s</button>
       <button class="btn secondary hidden" id="btn-cancel-cam">✕ Cancel — use upload instead</button>
       <input type="file" id="file-input" accept="image/*" style="display:none">
+      <div class="thumbs">
+        <div class="thumb empty" id="thumb-front">FRONT — PENDING</div>
+        <div class="thumb empty" id="thumb-side">SIDE — PENDING</div>
+      </div>
       <div class="privacy-note"><b>●</b> PROCESSED LOCALLY IN YOUR BROWSER — NOTHING IS UPLOADED</div>
     </div>
   </section>
@@ -305,22 +357,40 @@
     </div>
   </section>
 
-  <!-- STEP 4-6 · SCORE / SHARE / CTA -->
+  <!-- STEP 4-6 · SCORE / SLIDER / SHARE / CTA -->
   <section class="panel" id="panel-score">
     <div class="hud-frame">
       <div class="sys-label">▸ ANALYSIS COMPLETE · FINAL ASSESSMENT</div>
       <div id="score-ring-wrap">
         <svg id="score-ring" viewBox="0 0 200 200">
           <circle class="ring-bg" cx="100" cy="100" r="86"></circle>
-          <circle class="ring-fg" id="ring-fg" cx="100" cy="100" r="86"
-                  stroke-dasharray="540.35" stroke-dashoffset="540.35"></circle>
+          <circle class="ring-fg" id="ring-fg" cx="100" cy="100" r="86" stroke-dasharray="540.35" stroke-dashoffset="540.35"></circle>
           <text id="score-num" x="100" y="108" text-anchor="middle">0</text>
           <text id="score-outof" x="100" y="132" text-anchor="middle">/ 100</text>
         </svg>
       </div>
       <div id="verdict" aria-live="polite"></div>
       <div id="verdict-sub"></div>
+      <div id="subscores">
+        <div class="subscore"><div class="lbl">FRONT</div><div class="val" id="sub-front">–</div></div>
+        <div class="subscore"><div class="lbl">SIDE</div><div class="val" id="sub-side">–</div></div>
+      </div>
+
+      <div id="slider-box">
+        <div class="sys-label">▸ ALIGNMENT SIMULATION · DRAG TO COMPARE</div>
+        <div id="slider-wrap">
+          <canvas id="before-canvas"></canvas>
+          <div id="after-layer"><canvas id="after-canvas"></canvas></div>
+          <div class="slider-tag l">NOW</div>
+          <div class="slider-tag r">ALIGNED</div>
+          <div id="slider-handle"></div>
+          <input type="range" id="slider-range" min="0" max="100" value="50" aria-label="Compare current and aligned posture">
+        </div>
+        <div class="sim-note">Simulated visualisation of your own photo with alignment corrected.<br>Not a prediction of results.</div>
+      </div>
+
       <div id="metrics-final"></div>
+
       <div class="btn-row" style="margin-top:18px">
         <button class="btn" id="btn-share">⇪ Share Score</button>
         <button class="btn secondary" id="btn-retry" style="margin-top:0">↺ Rescan</button>
@@ -328,680 +398,18 @@
       <div class="cta-box">
         <div class="sys-label">▸ RECOMMENDED PROTOCOL</div>
         <p id="cta-text">Alignment is a daily habit — and it responds fast to the right routine. <b>KinaPT</b> builds you a personalised daily posture programme, designed by physiotherapists and powered by AI.</p>
-        <a class="btn cta" id="btn-kinapt" href="https://kinapt.app" target="_blank" rel="noopener">⚡ Fix My Posture with KinaPT</a>
+        <a class="btn cta" id="btn-kinapt" href="#" target="_blank" rel="noopener">⚡ Fix My Posture with KinaPT</a>
       </div>
     </div>
   </section>
 
-  <footer>POSTURE.SCAN is a wellness screening demo by KinaPT — not a medical device or diagnosis.<br>All analysis runs on your device. No images are stored or transmitted.</footer>
+  <footer>
+    POSTURE.SCAN is a wellness screening demo by KinaPT — not a medical device, diagnosis, or treatment.<br>
+    All analysis runs on your device. No images are stored or transmitted.
+  </footer>
 </div>
 
 <canvas id="share-canvas" width="1080" height="1350" style="display:none"></canvas>
-
-<script type="module">
-/* ============================================================
-   POSTURE.SCAN — client-side Jarvis-style posture analyzer
-   Pose estimation: MediaPipe Pose Landmarker (runs on-device)
-   ============================================================ */
-
-const APP_URL = location.origin + location.pathname;
-const KINAPT_URL = 'https://kinapt.app'; // TODO: replace with real KinaPT store/landing URL
-
-/* ---------- tiny helpers ---------- */
-const $ = (id) => document.getElementById(id);
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
-const deg = (rad) => rad * 180 / Math.PI;
-
-function showPanel(id) {
-  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-  $(id).classList.add('active');
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-}
-
-/* ---------- animated HUD background ---------- */
-(function bgFx() {
-  const c = $('bg-canvas'), ctx = c.getContext('2d');
-  let w, h, t = 0;
-  const resize = () => { w = c.width = innerWidth; h = c.height = innerHeight; };
-  resize(); addEventListener('resize', resize);
-  const dots = Array.from({ length: 40 }, () => ({
-    x: Math.random(), y: Math.random(), s: Math.random() * 1.4 + 0.4, v: Math.random() * 0.0006 + 0.0002
-  }));
-  (function loop() {
-    t++;
-    ctx.clearRect(0, 0, w, h);
-    // grid
-    ctx.strokeStyle = 'rgba(33,230,255,0.04)';
-    ctx.lineWidth = 1;
-    const g = 48;
-    for (let x = 0; x < w; x += g) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
-    for (let y = 0; y < h; y += g) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
-    // drifting particles
-    for (const d of dots) {
-      d.y -= d.v; if (d.y < 0) d.y = 1;
-      ctx.fillStyle = 'rgba(33,230,255,0.35)';
-      ctx.beginPath(); ctx.arc(d.x * w, d.y * h, d.s, 0, 7); ctx.fill();
-    }
-    // sweep line
-    const sy = (t * 0.6) % (h + 200) - 100;
-    const grad = ctx.createLinearGradient(0, sy - 60, 0, sy + 60);
-    grad.addColorStop(0, 'rgba(33,230,255,0)');
-    grad.addColorStop(0.5, 'rgba(33,230,255,0.05)');
-    grad.addColorStop(1, 'rgba(33,230,255,0)');
-    ctx.fillStyle = grad; ctx.fillRect(0, sy - 60, w, 120);
-    requestAnimationFrame(loop);
-  })();
-})();
-
-/* ---------- Jarvis voice ---------- */
-let voiceOn = true;
-let jarvisVoice = null;
-
-function pickVoice() {
-  const vs = speechSynthesis.getVoices();
-  if (!vs.length) return;
-  jarvisVoice =
-    vs.find(v => /en-GB/i.test(v.lang) && /male|daniel|arthur|george/i.test(v.name)) ||
-    vs.find(v => /en-GB/i.test(v.lang)) ||
-    vs.find(v => /^en/i.test(v.lang)) || vs[0];
-}
-if ('speechSynthesis' in window) {
-  pickVoice();
-  speechSynthesis.onvoiceschanged = pickVoice;
-}
-
-function say(text) {
-  if (!voiceOn || !('speechSynthesis' in window)) return;
-  try {
-    const u = new SpeechSynthesisUtterance(text);
-    if (jarvisVoice) u.voice = jarvisVoice;
-    u.rate = 1.02; u.pitch = 0.82; u.volume = 0.95;
-    if (speechSynthesis.speaking || speechSynthesis.pending) {
-      // Android Chrome goes silent if speak() immediately follows cancel()
-      speechSynthesis.cancel();
-      setTimeout(() => { try { speechSynthesis.speak(u); } catch (e) {} }, 80);
-    } else {
-      speechSynthesis.speak(u);
-    }
-  } catch (e) { /* voice is decorative — never block the flow */ }
-}
-
-$('mute-btn').addEventListener('click', () => {
-  voiceOn = !voiceOn;
-  $('mute-btn').textContent = voiceOn ? 'VOICE: ON' : 'VOICE: OFF';
-  if (!voiceOn && 'speechSynthesis' in window) speechSynthesis.cancel();
-});
-
-/* ---------- typewriter console ---------- */
-async function typeLines(el, lines, speed = 14) {
-  el.innerHTML = '';
-  const cur = document.createElement('span');
-  cur.className = 'cursor';
-  for (const line of lines) {
-    const span = document.createElement('span');
-    el.appendChild(span); el.appendChild(cur);
-    for (let i = 0; i <= line.length; i++) {
-      span.textContent = line.slice(0, i);
-      await sleep(speed);
-    }
-    el.insertBefore(document.createTextNode('\n'), cur);
-  }
-}
-
-/* ---------- MediaPipe lazy loader ---------- */
-let landmarkerPromise = null;
-function getLandmarker() {
-  if (!landmarkerPromise) {
-    landmarkerPromise = (async () => {
-      const vision = await import('./vendor/mediapipe/vision_bundle.mjs');
-      const files = await vision.FilesetResolver.forVisionTasks('./vendor/mediapipe/wasm');
-      return vision.PoseLandmarker.createFromOptions(files, {
-        baseOptions: {
-          modelAssetPath: './vendor/models/pose_landmarker_lite.task',
-          delegate: 'GPU'
-        },
-        runningMode: 'IMAGE',
-        numPoses: 1
-      });
-    })().catch(err => { landmarkerPromise = null; throw err; });
-  }
-  return landmarkerPromise;
-}
-
-/* ---------- greeting ---------- */
-const GREET_TEXT =
-  'Good day. I am KINA — your personal posture intelligence.\n' +
-  'I will scan your body alignment across 5 checkpoints and grade you out of 100.\n' +
-  'Very few humans achieve a perfect score. Let us see what you are made of.';
-
-let greeted = false;
-async function greet() {
-  if (greeted) return;
-  greeted = true;
-  typeLines($('console'), GREET_TEXT.split('\n'));
-}
-greet();
-
-$('btn-start').addEventListener('click', () => {
-  say('Initiating posture scan. Please acquire an image of the subject.');
-  getLandmarker().catch(() => {}); // pre-warm the model while the user takes a photo
-  showPanel('panel-capture');
-});
-
-/* ---------- capture: upload ---------- */
-$('btn-upload').addEventListener('click', () => $('file-input').click());
-$('file-input').addEventListener('change', (e) => {
-  const f = e.target.files && e.target.files[0];
-  if (!f) return;
-  const url = URL.createObjectURL(f);
-  const img = new Image();
-  img.onload = () => { URL.revokeObjectURL(url); startAnalysis(img); };
-  img.onerror = () => { URL.revokeObjectURL(url); showError('Could not read that image. Try a different photo (JPG/PNG).'); };
-  img.src = url;
-  e.target.value = '';
-});
-
-/* ---------- capture: live camera ---------- */
-let stream = null;
-function stopCamera() {
-  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
-  $('video-wrap').classList.add('hidden');
-  $('btn-snap').classList.add('hidden');
-  $('btn-snap').disabled = false;
-  $('btn-cancel-cam').classList.add('hidden');
-  $('capture-choices').classList.remove('hidden');
-}
-$('btn-cancel-cam').addEventListener('click', stopCamera);
-
-$('btn-camera').addEventListener('click', async () => {
-  hideError();
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    showError('Live camera not available in this browser — use Upload Photo instead.');
-    return;
-  }
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
-      audio: false
-    });
-    $('cam-video').srcObject = stream;
-    $('video-wrap').classList.remove('hidden');
-    $('btn-snap').classList.remove('hidden');
-    $('btn-cancel-cam').classList.remove('hidden');
-    $('capture-choices').classList.add('hidden');
-    say('Camera online. Position yourself in frame, then press capture.');
-  } catch (err) {
-    showError('Camera access denied. You can still use Upload Photo.');
-  }
-});
-
-$('btn-snap').addEventListener('click', async () => {
-  const video = $('cam-video');
-  if (!video.videoWidth || $('btn-snap').disabled) return;
-  $('btn-snap').disabled = true;
-  $('btn-cancel-cam').classList.add('hidden');
-  const cd = $('countdown');
-  cd.style.display = 'flex';
-  for (const n of ['3', '2', '1']) {
-    cd.textContent = n;
-    say(n);
-    await sleep(900);
-  }
-  cd.style.display = 'none';
-  const c = document.createElement('canvas');
-  c.width = video.videoWidth; c.height = video.videoHeight;
-  const cx = c.getContext('2d');
-  // mirror the frame to match the mirrored preview (WYSIWYG). Note this swaps
-  // MediaPipe's anatomical left/right labels — fine while all metrics are
-  // symmetric (abs values / visibility-picked side); revisit before adding
-  // side-specific feedback like "your left shoulder is higher".
-  cx.translate(c.width, 0); cx.scale(-1, 1);
-  cx.drawImage(video, 0, 0);
-  stopCamera();
-  const img = new Image();
-  img.onload = () => startAnalysis(img);
-  img.src = c.toDataURL('image/jpeg', 0.92);
-});
-
-function showError(msg) {
-  const b = $('err-box');
-  b.textContent = '⚠ ' + msg;
-  b.style.display = 'block';
-}
-function hideError() { $('err-box').style.display = 'none'; }
-
-/* ============================================================
-   ANALYSIS
-   ============================================================ */
-
-// MediaPipe pose landmark indices
-const LM = {
-  nose: 0, leftEye: 2, rightEye: 5, leftEar: 7, rightEar: 8,
-  leftShoulder: 11, rightShoulder: 12, leftHip: 23, rightHip: 24,
-  leftKnee: 25, rightKnee: 26, leftAnkle: 27, rightAnkle: 28
-};
-
-const SEV_LABELS = ['OPTIMAL', 'MINOR', 'MODERATE', 'SEVERE'];
-
-function sevBucket(s) { return s < 0.2 ? 0 : s < 0.45 ? 1 : s < 0.72 ? 2 : 3; }
-
-function mid(a, b) { return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
-function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
-
-/**
- * Compute posture metrics from normalized landmarks.
- * Returns { view, metrics: [{name, severity, tip}], score }
- * severity: 0 (perfect) → 1 (severe). Score weights severities.
- */
-function assessPosture(lms, imgW, imgH) {
-  // MediaPipe normalizes x by image width and y by image height. Rescale x
-  // into y-units so angles and length ratios are aspect-correct — otherwise a
-  // portrait phone photo under-reports lateral tilts and inflates leans.
-  const A = imgW / imgH;
-  const pts = lms.map(l => ({ x: l.x * A, y: l.y }));
-  const p = (i) => pts[i];
-  const vis = (i) => (lms[i].visibility ?? 1);
-
-  const ls = p(LM.leftShoulder), rs = p(LM.rightShoulder);
-  const lh = p(LM.leftHip), rh = p(LM.rightHip);
-  const midSh = mid(ls, rs), midHip = mid(lh, rh);
-  const shoulderW = Math.abs(ls.x - rs.x);
-  const torsoLen = dist(midSh, midHip) || 0.001;
-
-  // Side view when shoulders overlap horizontally relative to torso length
-  const isSide = shoulderW < 0.38 * torsoLen;
-
-  const metrics = [];
-  const add = (name, severity, tip, weight = 1) =>
-    metrics.push({ name, severity: clamp(severity, 0, 1), tip, weight });
-
-  if (!isSide) {
-    /* -------- FRONT VIEW -------- */
-    // 1. Head tilt (ear-line angle from horizontal)
-    const le = p(LM.leftEar), re = p(LM.rightEar);
-    const earPair = (vis(LM.leftEar) > 0.5 && vis(LM.rightEar) > 0.5)
-      ? [le, re] : [p(LM.leftEye), p(LM.rightEye)];
-    const headTilt = Math.abs(deg(Math.atan2(earPair[0].y - earPair[1].y, earPair[0].x - earPair[1].x)));
-    add('HEAD TILT', headTilt / 12, 'Your head leans to one side — often from screens or one-sided habits.', 1);
-
-    // 2. Shoulder level
-    const shTilt = Math.abs(deg(Math.atan2(ls.y - rs.y, ls.x - rs.x)));
-    add('SHOULDER LEVEL', shTilt / 9, 'One shoulder rides higher — a classic sign of bag-carrying or desk lean.', 1.2);
-
-    // 3. Head centering over shoulders
-    const headShift = Math.abs(p(LM.nose).x - midSh.x) / (shoulderW || 0.001);
-    add('HEAD ALIGNMENT', headShift / 0.32, 'Your head drifts off your body\'s centerline.', 1);
-
-    // 4. Hip level
-    const hipTilt = Math.abs(deg(Math.atan2(lh.y - rh.y, lh.x - rh.x)));
-    add('PELVIC BALANCE', hipTilt / 8, 'Uneven hips can cascade into back and knee strain.', 1);
-
-    // 5. Torso lean (shoulders vs hips, from vertical)
-    const lean = Math.abs(deg(Math.atan2(midSh.x - midHip.x, midHip.y - midSh.y)));
-    add('SPINAL LEAN', lean / 7, 'Your upper body leans off vertical.', 1.2);
-  } else {
-    /* -------- SIDE VIEW -------- */
-    // pick the more visible side
-    const leftSide = vis(LM.leftEar) + vis(LM.leftShoulder) >= vis(LM.rightEar) + vis(LM.rightShoulder);
-    const ear = leftSide ? p(LM.leftEar) : p(LM.rightEar);
-    const sh = leftSide ? ls : rs;
-    const hip = leftSide ? lh : rh;
-    const knee = leftSide ? p(LM.leftKnee) : p(LM.rightKnee);
-
-    // 1. Forward head posture (ear ahead of shoulder)
-    const fwdHead = Math.abs(ear.x - sh.x) / torsoLen;
-    add('FORWARD HEAD', fwdHead / 0.28, '"Tech neck" — a forward head position can add significant load to your neck and spine.', 1.5);
-
-    // 2. Neck angle from vertical
-    const neckAng = Math.abs(deg(Math.atan2(ear.x - sh.x, sh.y - ear.y)));
-    add('NECK ANGLE', neckAng / 30, 'Your neck angles forward instead of stacking over your shoulders.', 1.2);
-
-    // 3. Rounded upper back (shoulder ahead of hip)
-    const roundBack = Math.abs(sh.x - hip.x) / torsoLen;
-    add('SHOULDER STACK', roundBack / 0.2, 'Shoulders sit ahead of your hips — rounded upper back pattern.', 1.3);
-
-    // 4. Hip stack over knee (if legs visible)
-    if (vis(leftSide ? LM.leftKnee : LM.rightKnee) > 0.5) {
-      const hipStack = Math.abs(hip.x - knee.x) / torsoLen;
-      add('HIP STACK', hipStack / 0.22, 'Hips drift off the vertical line through your knees.', 0.8);
-    }
-
-    // 5. Overall plumb line (ear → hip from vertical)
-    const plumb = Math.abs(deg(Math.atan2(ear.x - hip.x, hip.y - ear.y)));
-    add('PLUMB LINE', plumb / 14, 'The classic ear-shoulder-hip line is broken.', 1.2);
-  }
-
-  const wSum = metrics.reduce((s, m) => s + m.weight, 0);
-  const sevAvg = metrics.reduce((s, m) => s + m.severity * m.weight, 0) / wSum;
-  // non-linear so mid-range scores cluster 55-85 (shareable but motivating)
-  const score = Math.round(clamp(100 - Math.pow(sevAvg, 0.85) * 95, 8, 100));
-
-  return { view: isSide ? 'SIDE PROFILE' : 'FRONTAL', metrics, score };
-}
-
-function verdictFor(score) {
-  if (score >= 90) return {
-    title: '🏆 STARK-LEVEL ALIGNMENT',
-    sub: 'Exceptional. Your skeleton would make a physiotherapist weep with joy. Maintain the protocol.',
-    voice: `Remarkable. ${score} out of one hundred. Your alignment is in the top percentile of humans I have scanned. I am genuinely impressed.`
-  };
-  if (score >= 75) return {
-    title: '✅ COMBAT READY',
-    sub: 'Solid alignment with minor deviations. A focused routine would push you into elite territory.',
-    voice: `${score} out of one hundred. Respectable, human. Minor deviations detected — nothing a proper protocol cannot fix.`
-  };
-  if (score >= 55) return {
-    title: '⚠ STRUCTURAL DRIFT DETECTED',
-    sub: 'Your frame is compensating in multiple places. This is where most desk workers live. It\'s fixable.',
-    voice: `${score} out of one hundred. Structural drift detected. Your spine is filing a formal complaint. I recommend intervention.`
-  };
-  return {
-    title: '🚨 CRITICAL MISALIGNMENT',
-    sub: 'Multiple checkpoints failing. Your posture needs an intervention — the good news: it responds fast to daily correction.',
-    voice: `${score} out of one hundred. This is... concerning. Your posture resembles a question mark. Deploying corrective protocol immediately.`
-  };
-}
-
-/* ---------- skeleton drawing ---------- */
-const BONES = [
-  [7, 8], [11, 12], [11, 23], [12, 24], [23, 24],
-  [23, 25], [24, 26], [25, 27], [26, 28], [11, 13], [12, 14]
-];
-
-function drawScene(ctx, img, W, H, lms, progress) {
-  ctx.clearRect(0, 0, W, H);
-  ctx.drawImage(img, 0, 0, W, H);
-  // dark cinematic wash
-  ctx.fillStyle = 'rgba(4,8,15,0.35)';
-  ctx.fillRect(0, 0, W, H);
-
-  if (lms) {
-    const P = (i) => ({ x: lms[i].x * W, y: lms[i].y * H });
-    ctx.lineWidth = Math.max(2, W / 300);
-    for (const [a, b] of BONES) {
-      if ((lms[a].visibility ?? 1) < 0.4 || (lms[b].visibility ?? 1) < 0.4) continue;
-      const pa = P(a), pb = P(b);
-      ctx.strokeStyle = 'rgba(33,230,255,0.85)';
-      ctx.shadowColor = '#21e6ff'; ctx.shadowBlur = 10;
-      ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.lineTo(pb.x, pb.y); ctx.stroke();
-    }
-    ctx.shadowBlur = 0;
-    const KEY_PTS = [0, 7, 8, 11, 12, 23, 24, 25, 26, 27, 28];
-    for (const i of KEY_PTS) {
-      if ((lms[i].visibility ?? 1) < 0.4) continue;
-      const pt = P(i);
-      ctx.fillStyle = '#21e6ff';
-      ctx.beginPath(); ctx.arc(pt.x, pt.y, Math.max(3, W / 220), 0, 7); ctx.fill();
-      ctx.strokeStyle = 'rgba(33,230,255,0.5)';
-      ctx.beginPath(); ctx.arc(pt.x, pt.y, Math.max(7, W / 90), 0, 7); ctx.stroke();
-    }
-  }
-
-  // scan line sweep
-  if (progress < 1) {
-    const y = H * progress;
-    const grad = ctx.createLinearGradient(0, y - 40, 0, y + 40);
-    grad.addColorStop(0, 'rgba(33,230,255,0)');
-    grad.addColorStop(0.5, 'rgba(33,230,255,0.35)');
-    grad.addColorStop(1, 'rgba(33,230,255,0)');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, y - 40, W, 80);
-    ctx.fillStyle = 'rgba(33,230,255,0.9)';
-    ctx.fillRect(0, y, W, 2);
-  }
-}
-
-/* ---------- main analysis flow ---------- */
-let lastResult = null;
-
-async function startAnalysis(img) {
-  hideError();
-  showPanel('panel-analyze');
-  $('metrics').innerHTML = '';
-  $('scan-status').textContent = 'CALIBRATING SENSORS…';
-  say('Image acquired. Commencing biomechanical analysis.');
-
-  // fit image into canvas
-  const canvas = $('scan-canvas');
-  const maxW = 1000;
-  const scale = Math.min(1, maxW / img.width);
-  const W = canvas.width = Math.round(img.width * scale);
-  const H = canvas.height = Math.round(img.height * scale);
-  const ctx = canvas.getContext('2d');
-  drawScene(ctx, img, W, H, null, 0);
-
-  // run detection while the scan animation plays
-  let detection = null, detErr = null, settled = false;
-  getLandmarker()
-    .then(lm => { detection = lm.detect(img); })
-    .catch(e => { detErr = e; })
-    .finally(() => { settled = true; });
-
-  // animated sweep (min 2.2s so it always feels like a scan); if the AI core
-  // is still loading after that (slow first visit), keep sweeping with a
-  // loading status instead of freezing, and bail out after 30s.
-  const t0 = performance.now();
-  const SWEEP_MS = 2200;
-  const TIMEOUT_MS = 30000;
-  const statuses = ['CALIBRATING SENSORS…', 'MAPPING SKELETAL NODES…', 'MEASURING JOINT VECTORS…', 'GRADING CHECKPOINTS…'];
-  await new Promise(res => {
-    (function frame() {
-      const el = performance.now() - t0;
-      const pr = Math.min(1, el / SWEEP_MS);
-      const lms = detection && detection.landmarks && detection.landmarks[0];
-      if (pr < 1) {
-        $('scan-status').textContent = statuses[Math.min(statuses.length - 1, Math.floor(pr * statuses.length))];
-        drawScene(ctx, img, W, H, lms || null, pr);
-        requestAnimationFrame(frame);
-      } else if (!settled && el < TIMEOUT_MS) {
-        $('scan-status').textContent = 'LOADING AI CORE… FIRST SCAN TAKES A MOMENT';
-        drawScene(ctx, img, W, H, lms || null, (el / SWEEP_MS) % 1);
-        requestAnimationFrame(frame);
-      } else {
-        res();
-      }
-    })();
-  });
-
-  if (!settled) {
-    showPanel('panel-capture');
-    showError('The AI engine is taking too long to load. Check your connection and retry.');
-    return;
-  }
-  if (detErr) {
-    showPanel('panel-capture');
-    showError('The AI engine failed to load (network issue). Check your connection and retry.');
-    return;
-  }
-  const lms = detection && detection.landmarks && detection.landmarks[0];
-  if (!lms) {
-    showPanel('panel-capture');
-    showError('No human detected in frame. Make sure your head and hips are visible, with decent lighting, then retry.');
-    say('Scan failed. I could not locate a human in the image. Adjust your position and try again.');
-    return;
-  }
-  // require the core torso landmarks
-  const core = [LM.leftShoulder, LM.rightShoulder, LM.leftHip, LM.rightHip];
-  if (core.some(i => (lms[i].visibility ?? 1) < 0.4)) {
-    showPanel('panel-capture');
-    showError('I can\'t see your full torso. Step back so your head AND hips are in frame, then retry.');
-    say('Partial detection only. Step back so I can see you from head to hips.');
-    return;
-  }
-
-  drawScene(ctx, img, W, H, lms, 1);
-  const result = assessPosture(lms, img.width, img.height);
-  lastResult = result;
-  $('scan-status').textContent = `VIEW: ${result.view} · ${result.metrics.length} CHECKPOINTS LOCKED`;
-
-  // reveal metric rows one by one
-  say(`${result.metrics.length} checkpoints locked. Grading severity now.`);
-  for (const m of result.metrics) {
-    const row = metricRow(m);
-    $('metrics').appendChild(row);
-    await sleep(120);
-    row.classList.add('show');
-    await sleep(420);
-  }
-  await sleep(700);
-  revealScore(result);
-}
-
-function metricRow(m) {
-  const b = sevBucket(m.severity);
-  const row = document.createElement('div');
-  row.className = 'metric-row';
-  row.innerHTML = `<span class="metric-name">▸ ${m.name}</span>
-                   <span class="metric-badge sev-${b}">${SEV_LABELS[b]}</span>`;
-  return row;
-}
-
-/* ---------- score reveal ---------- */
-function revealScore(result) {
-  showPanel('panel-score');
-  const v = verdictFor(result.score);
-  $('verdict').textContent = v.title;
-  $('verdict-sub').textContent = v.sub;
-
-  // repeat metric list on score panel
-  const fin = $('metrics-final');
-  fin.innerHTML = '';
-  fin.className = '';
-  for (const m of result.metrics) {
-    const row = metricRow(m);
-    row.classList.add('show');
-    fin.appendChild(row);
-  }
-
-  // animate ring + number
-  const CIRC = 2 * Math.PI * 86;
-  const ring = $('ring-fg');
-  ring.style.strokeDasharray = CIRC;
-  ring.style.strokeDashoffset = CIRC;
-  const color = result.score >= 75 ? 'var(--green)' : result.score >= 55 ? 'var(--cyan)' : result.score >= 40 ? 'var(--orange)' : 'var(--red)';
-  ring.style.stroke = color;
-  requestAnimationFrame(() => requestAnimationFrame(() => {
-    ring.style.strokeDashoffset = CIRC * (1 - result.score / 100);
-  }));
-  const numEl = $('score-num');
-  const t0 = performance.now();
-  (function count() {
-    const pr = Math.min(1, (performance.now() - t0) / 1900);
-    numEl.textContent = Math.round(result.score * (1 - Math.pow(1 - pr, 3)));
-    if (pr < 1) requestAnimationFrame(count);
-  })();
-
-  say(v.voice + ' To correct these deviations, I recommend the Kina P T protocol. Tap the orange button.');
-}
-
-/* ---------- share ---------- */
-function buildShareCard(result) {
-  const c = $('share-canvas'), ctx = c.getContext('2d');
-  const W = c.width, H = c.height;
-  // bg
-  ctx.fillStyle = '#04080f'; ctx.fillRect(0, 0, W, H);
-  ctx.strokeStyle = 'rgba(33,230,255,0.06)';
-  for (let x = 0; x < W; x += 54) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
-  for (let y = 0; y < H; y += 54) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
-  // frame
-  ctx.strokeStyle = '#21e6ff'; ctx.lineWidth = 3;
-  ctx.strokeRect(40, 40, W - 80, H - 80);
-  // header
-  ctx.fillStyle = '#21e6ff';
-  ctx.font = '600 42px monospace'; ctx.textAlign = 'center';
-  ctx.fillText('KINA·OS // POSTURE.SCAN', W / 2, 140);
-  ctx.fillStyle = '#6da8bd'; ctx.font = '28px monospace';
-  ctx.fillText('AI POSTURE ANALYSIS · SCAN RESULT', W / 2, 190);
-  // ring
-  const cx = W / 2, cy = 560, r = 260;
-  ctx.strokeStyle = 'rgba(33,230,255,0.15)'; ctx.lineWidth = 34;
-  ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.stroke();
-  const col = result.score >= 75 ? '#3dffa0' : result.score >= 55 ? '#21e6ff' : result.score >= 40 ? '#ffb347' : '#ff4d5e';
-  ctx.strokeStyle = col; ctx.lineCap = 'round';
-  ctx.shadowColor = col; ctx.shadowBlur = 30;
-  ctx.beginPath();
-  ctx.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + (result.score / 100) * Math.PI * 2);
-  ctx.stroke();
-  ctx.shadowBlur = 0;
-  ctx.fillStyle = '#fff'; ctx.font = '700 200px monospace';
-  ctx.fillText(String(result.score), cx, cy + 60);
-  ctx.fillStyle = '#6da8bd'; ctx.font = '40px monospace';
-  ctx.fillText('/ 100', cx, cy + 130);
-  // verdict
-  const v = verdictFor(result.score);
-  ctx.fillStyle = '#fff'; ctx.font = '600 52px sans-serif';
-  ctx.fillText(v.title.replace(/^[^\w]+\s*/, ''), W / 2, 960);
-  // metrics summary
-  ctx.font = '30px monospace'; ctx.textAlign = 'left';
-  let y = 1040;
-  for (const m of result.metrics.slice(0, 4)) {
-    const b = sevBucket(m.severity);
-    ctx.fillStyle = '#a8d8e8';
-    ctx.fillText('▸ ' + m.name, 120, y);
-    ctx.fillStyle = ['#3dffa0', '#21e6ff', '#ffb347', '#ff4d5e'][b];
-    ctx.textAlign = 'right';
-    ctx.fillText(SEV_LABELS[b], W - 120, y);
-    ctx.textAlign = 'left';
-    y += 54;
-  }
-  // footer
-  ctx.textAlign = 'center';
-  ctx.fillStyle = '#21e6ff'; ctx.font = '600 36px monospace';
-  ctx.fillText('Can you beat my score?', W / 2, H - 130);
-  ctx.fillStyle = '#6da8bd'; ctx.font = '30px monospace';
-  ctx.fillText(APP_URL.replace(/^https?:\/\//, ''), W / 2, H - 80);
-  return c;
-}
-
-let sharing = false;
-$('btn-share').addEventListener('click', async () => {
-  if (!lastResult || sharing) return;
-  sharing = true;
-  $('btn-share').disabled = true;
-  try {
-    const card = buildShareCard(lastResult);
-    const shareText = `KINA scanned my posture: ${lastResult.score}/100 😳 Can you beat my score?`;
-    const blob = await new Promise(r => card.toBlob(r, 'image/png'));
-    const file = blob && new File([blob], 'posture-score.png', { type: 'image/png' });
-
-    if (navigator.share) {
-      // mobile: native share sheet. Transient failures (sheet already open,
-      // lost user activation) are no-ops — never fall through to the desktop
-      // download+popup path on a device that has a share sheet.
-      try {
-        if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
-          await navigator.share({ files: [file], text: shareText, title: 'My Posture Score' });
-        } else {
-          await navigator.share({ text: shareText + ' ' + APP_URL, title: 'My Posture Score' });
-        }
-      } catch (e) { /* AbortError / NotAllowedError / InvalidStateError */ }
-      return;
-    }
-
-    // desktop fallback: download card + open a tweet
-    if (blob) {
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = 'posture-score.png';
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-    }
-    window.open('https://twitter.com/intent/tweet?text=' +
-      encodeURIComponent(shareText + ' ' + APP_URL), '_blank');
-  } finally {
-    sharing = false;
-    $('btn-share').disabled = false;
-  }
-});
-
-/* ---------- retry ---------- */
-$('btn-retry').addEventListener('click', () => {
-  hideError();
-  showPanel('panel-capture');
-  say('Rescanning. Show me your best posture, human.');
-});
-$('btn-kinapt').href = KINAPT_URL;
-</script>
+<script type="module" src="./app.js"></script>
 </body>
 </html>
