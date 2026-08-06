@@ -7,7 +7,7 @@ and funnels the user to **KinaPT**.
 
 ## The 6-step funnel
 
-1. **Greet** — animated boot sequence, typed + spoken instructions
+1. **Greet** — animated boot sequence, typed instructions (voice starts on the first tap, per mobile autoplay policies)
 2. **Capture** — live camera (3-2-1 countdown) or photo upload
 3. **Analyze** — MediaPipe pose detection, skeleton overlay, scan-line sweep, per-checkpoint severity grading (OPTIMAL / MINOR / MODERATE / SEVERE)
 4. **Score** — animated ring, score /100, Jarvis-style verdict
@@ -24,14 +24,14 @@ Hosted free on **GitHub Pages** — no backend, no keys, no scaling cost:
 
 Before boosting:
 - Replace `KINAPT_URL` in `index.html` with the real KinaPT store/landing link (currently `https://kinapt.app`)
-- Add an `og:image` (a sample score card) so link previews pop on social
+- The `og:image` tag points at `assets/og-card.png` on the default GitHub Pages URL — update the absolute URL in `index.html` if you use a custom domain
 
 ## Architecture — why it's built this way
 
 **Everything runs client-side.** Pose estimation uses Google's free
 **MediaPipe Pose Landmarker** (pretrained, ~5&nbsp;MB model, vendored into `/vendor`
 so the whole app is served from one origin — no third-party CDN — and runs
-in-browser via WASM/WebGPU). The Jarvis voice is the browser's **Web Speech API**. Share
+in-browser via WASM/WebGL). The Jarvis voice is the browser's **Web Speech API**. Share
 cards are drawn with **Canvas**. There is no server:
 
 - **$0 per user** — boosted traffic spikes cost nothing and can't take the app down

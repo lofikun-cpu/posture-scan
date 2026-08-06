@@ -2,11 +2,13 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>POSTURE.SCAN — AI Posture Analysis</title>
 <meta name="description" content="Scan your posture with AI in 10 seconds. Get your Posture Score out of 100 — powered by KinaPT.">
 <meta property="og:title" content="POSTURE.SCAN — What's your Posture Score?">
-<meta property="og:description" content="AI scans your posture like Jarvis scans Iron Man. Get graded out of 100. Most people fail.">
+<meta property="og:description" content="AI scans your posture like Jarvis scans Iron Man. Get your alignment score out of 100 — free, in 10 seconds.">
+<meta property="og:image" content="https://lofikun-cpu.github.io/posture-scan/assets/og-card.png">
+<meta name="twitter:card" content="summary_large_image">
 <meta property="og:type" content="website">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='40' fill='none' stroke='%2321e6ff' stroke-width='8'/%3E%3Ccircle cx='50' cy='50' r='14' fill='%2321e6ff'/%3E%3C/svg%3E">
 <style>
@@ -137,6 +139,7 @@
     text-decoration: none;
   }
   .btn:active { transform: scale(0.98); }
+  .btn:disabled { opacity: 0.45; pointer-events: none; }
   .btn:hover { background: rgba(33,230,255,0.22); box-shadow: 0 0 24px var(--cyan-dim); }
   .btn.secondary {
     background: none; border-color: var(--cyan-dim); color: #7fb8cc;
@@ -259,7 +262,7 @@
     <div class="hud-frame">
       <div class="sys-label">▸ SYSTEM ONLINE · POSTURE ANALYSIS MODULE v2.1</div>
       <h1>How good is <span class="accent">your posture?</span></h1>
-      <div id="console"><span class="cursor"></span></div>
+      <div id="console" aria-live="polite"><span class="cursor"></span></div>
       <ul class="instructions">
         <li data-n="1">Stand 2–3 steps from the camera — head to hips visible</li>
         <li data-n="2">Face the camera, OR turn 90° for a side-profile scan</li>
@@ -286,6 +289,7 @@
         <button class="btn" id="btn-upload">🖼 Upload Photo</button>
       </div>
       <button class="btn hidden" id="btn-snap" style="margin-top:12px">◉ Capture in 3s</button>
+      <button class="btn secondary hidden" id="btn-cancel-cam">✕ Cancel — use upload instead</button>
       <input type="file" id="file-input" accept="image/*" style="display:none">
       <div class="privacy-note"><b>●</b> PROCESSED LOCALLY IN YOUR BROWSER — NOTHING IS UPLOADED</div>
     </div>
@@ -314,7 +318,7 @@
           <text id="score-outof" x="100" y="132" text-anchor="middle">/ 100</text>
         </svg>
       </div>
-      <div id="verdict"></div>
+      <div id="verdict" aria-live="polite"></div>
       <div id="verdict-sub"></div>
       <div id="metrics-final"></div>
       <div class="btn-row" style="margin-top:18px">
@@ -323,7 +327,7 @@
       </div>
       <div class="cta-box">
         <div class="sys-label">▸ RECOMMENDED PROTOCOL</div>
-        <p id="cta-text">Your posture is costing you height, confidence and energy. <b>KinaPT</b> builds you a personalised daily routine to fix it — designed by physiotherapists, powered by AI.</p>
+        <p id="cta-text">Alignment is a daily habit — and it responds fast to the right routine. <b>KinaPT</b> builds you a personalised daily posture programme, designed by physiotherapists and powered by AI.</p>
         <a class="btn cta" id="btn-kinapt" href="https://kinapt.app" target="_blank" rel="noopener">⚡ Fix My Posture with KinaPT</a>
       </div>
     </div>
@@ -410,18 +414,23 @@ if ('speechSynthesis' in window) {
 function say(text) {
   if (!voiceOn || !('speechSynthesis' in window)) return;
   try {
-    speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
     if (jarvisVoice) u.voice = jarvisVoice;
     u.rate = 1.02; u.pitch = 0.82; u.volume = 0.95;
-    speechSynthesis.speak(u);
+    if (speechSynthesis.speaking || speechSynthesis.pending) {
+      // Android Chrome goes silent if speak() immediately follows cancel()
+      speechSynthesis.cancel();
+      setTimeout(() => { try { speechSynthesis.speak(u); } catch (e) {} }, 80);
+    } else {
+      speechSynthesis.speak(u);
+    }
   } catch (e) { /* voice is decorative — never block the flow */ }
 }
 
 $('mute-btn').addEventListener('click', () => {
   voiceOn = !voiceOn;
   $('mute-btn').textContent = voiceOn ? 'VOICE: ON' : 'VOICE: OFF';
-  if (!voiceOn) speechSynthesis.cancel();
+  if (!voiceOn && 'speechSynthesis' in window) speechSynthesis.cancel();
 });
 
 /* ---------- typewriter console ---------- */
@@ -464,7 +473,7 @@ function getLandmarker() {
 const GREET_TEXT =
   'Good day. I am KINA — your personal posture intelligence.\n' +
   'I will scan your body alignment across 5 checkpoints and grade you out of 100.\n' +
-  'Most humans score below 70. Let us see what you are made of.';
+  'Very few humans achieve a perfect score. Let us see what you are made of.';
 
 let greeted = false;
 async function greet() {
@@ -485,10 +494,11 @@ $('btn-upload').addEventListener('click', () => $('file-input').click());
 $('file-input').addEventListener('change', (e) => {
   const f = e.target.files && e.target.files[0];
   if (!f) return;
+  const url = URL.createObjectURL(f);
   const img = new Image();
-  img.onload = () => { URL.revokeObjectURL(img.src); startAnalysis(img); };
-  img.onerror = () => showError('Could not read that image. Try a different photo (JPG/PNG).');
-  img.src = URL.createObjectURL(f);
+  img.onload = () => { URL.revokeObjectURL(url); startAnalysis(img); };
+  img.onerror = () => { URL.revokeObjectURL(url); showError('Could not read that image. Try a different photo (JPG/PNG).'); };
+  img.src = url;
   e.target.value = '';
 });
 
@@ -498,8 +508,11 @@ function stopCamera() {
   if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
   $('video-wrap').classList.add('hidden');
   $('btn-snap').classList.add('hidden');
+  $('btn-snap').disabled = false;
+  $('btn-cancel-cam').classList.add('hidden');
   $('capture-choices').classList.remove('hidden');
 }
+$('btn-cancel-cam').addEventListener('click', stopCamera);
 
 $('btn-camera').addEventListener('click', async () => {
   hideError();
@@ -515,6 +528,7 @@ $('btn-camera').addEventListener('click', async () => {
     $('cam-video').srcObject = stream;
     $('video-wrap').classList.remove('hidden');
     $('btn-snap').classList.remove('hidden');
+    $('btn-cancel-cam').classList.remove('hidden');
     $('capture-choices').classList.add('hidden');
     say('Camera online. Position yourself in frame, then press capture.');
   } catch (err) {
@@ -524,7 +538,9 @@ $('btn-camera').addEventListener('click', async () => {
 
 $('btn-snap').addEventListener('click', async () => {
   const video = $('cam-video');
-  if (!video.videoWidth) return;
+  if (!video.videoWidth || $('btn-snap').disabled) return;
+  $('btn-snap').disabled = true;
+  $('btn-cancel-cam').classList.add('hidden');
   const cd = $('countdown');
   cd.style.display = 'flex';
   for (const n of ['3', '2', '1']) {
@@ -536,7 +552,10 @@ $('btn-snap').addEventListener('click', async () => {
   const c = document.createElement('canvas');
   c.width = video.videoWidth; c.height = video.videoHeight;
   const cx = c.getContext('2d');
-  // un-mirror so left/right metrics are anatomically correct
+  // mirror the frame to match the mirrored preview (WYSIWYG). Note this swaps
+  // MediaPipe's anatomical left/right labels — fine while all metrics are
+  // symmetric (abs values / visibility-picked side); revisit before adding
+  // side-specific feedback like "your left shoulder is higher".
   cx.translate(c.width, 0); cx.scale(-1, 1);
   cx.drawImage(video, 0, 0);
   stopCamera();
@@ -575,8 +594,13 @@ function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
  * Returns { view, metrics: [{name, severity, tip}], score }
  * severity: 0 (perfect) → 1 (severe). Score weights severities.
  */
-function assessPosture(lms) {
-  const p = (i) => lms[i];
+function assessPosture(lms, imgW, imgH) {
+  // MediaPipe normalizes x by image width and y by image height. Rescale x
+  // into y-units so angles and length ratios are aspect-correct — otherwise a
+  // portrait phone photo under-reports lateral tilts and inflates leans.
+  const A = imgW / imgH;
+  const pts = lms.map(l => ({ x: l.x * A, y: l.y }));
+  const p = (i) => pts[i];
   const vis = (i) => (lms[i].visibility ?? 1);
 
   const ls = p(LM.leftShoulder), rs = p(LM.rightShoulder);
@@ -627,7 +651,7 @@ function assessPosture(lms) {
 
     // 1. Forward head posture (ear ahead of shoulder)
     const fwdHead = Math.abs(ear.x - sh.x) / torsoLen;
-    add('FORWARD HEAD', fwdHead / 0.28, '"Tech neck" — every 2.5cm forward adds ~4.5kg of load to your spine.', 1.5);
+    add('FORWARD HEAD', fwdHead / 0.28, '"Tech neck" — a forward head position can add significant load to your neck and spine.', 1.5);
 
     // 2. Neck angle from vertical
     const neckAng = Math.abs(deg(Math.atan2(ear.x - sh.x, sh.y - ear.y)));
@@ -748,27 +772,43 @@ async function startAnalysis(img) {
   drawScene(ctx, img, W, H, null, 0);
 
   // run detection while the scan animation plays
-  let detection = null, detErr = null;
-  const detPromise = getLandmarker()
+  let detection = null, detErr = null, settled = false;
+  getLandmarker()
     .then(lm => { detection = lm.detect(img); })
-    .catch(e => { detErr = e; });
+    .catch(e => { detErr = e; })
+    .finally(() => { settled = true; });
 
-  // animated sweep (min 2.2s so it always feels like a scan)
+  // animated sweep (min 2.2s so it always feels like a scan); if the AI core
+  // is still loading after that (slow first visit), keep sweeping with a
+  // loading status instead of freezing, and bail out after 30s.
   const t0 = performance.now();
   const SWEEP_MS = 2200;
+  const TIMEOUT_MS = 30000;
   const statuses = ['CALIBRATING SENSORS…', 'MAPPING SKELETAL NODES…', 'MEASURING JOINT VECTORS…', 'GRADING CHECKPOINTS…'];
   await new Promise(res => {
     (function frame() {
       const el = performance.now() - t0;
       const pr = Math.min(1, el / SWEEP_MS);
-      $('scan-status').textContent = statuses[Math.min(statuses.length - 1, Math.floor(pr * statuses.length))];
       const lms = detection && detection.landmarks && detection.landmarks[0];
-      drawScene(ctx, img, W, H, lms || null, pr);
-      if (pr < 1) requestAnimationFrame(frame); else res();
+      if (pr < 1) {
+        $('scan-status').textContent = statuses[Math.min(statuses.length - 1, Math.floor(pr * statuses.length))];
+        drawScene(ctx, img, W, H, lms || null, pr);
+        requestAnimationFrame(frame);
+      } else if (!settled && el < TIMEOUT_MS) {
+        $('scan-status').textContent = 'LOADING AI CORE… FIRST SCAN TAKES A MOMENT';
+        drawScene(ctx, img, W, H, lms || null, (el / SWEEP_MS) % 1);
+        requestAnimationFrame(frame);
+      } else {
+        res();
+      }
     })();
   });
-  await detPromise;
 
+  if (!settled) {
+    showPanel('panel-capture');
+    showError('The AI engine is taking too long to load. Check your connection and retry.');
+    return;
+  }
   if (detErr) {
     showPanel('panel-capture');
     showError('The AI engine failed to load (network issue). Check your connection and retry.');
@@ -791,7 +831,7 @@ async function startAnalysis(img) {
   }
 
   drawScene(ctx, img, W, H, lms, 1);
-  const result = assessPosture(lms);
+  const result = assessPosture(lms, img.width, img.height);
   lastResult = result;
   $('scan-status').textContent = `VIEW: ${result.view} · ${result.metrics.length} CHECKPOINTS LOCKED`;
 
@@ -872,7 +912,7 @@ function buildShareCard(result) {
   ctx.font = '600 42px monospace'; ctx.textAlign = 'center';
   ctx.fillText('KINA·OS // POSTURE.SCAN', W / 2, 140);
   ctx.fillStyle = '#6da8bd'; ctx.font = '28px monospace';
-  ctx.fillText('AI POSTURE ANALYSIS · OFFICIAL RESULT', W / 2, 190);
+  ctx.fillText('AI POSTURE ANALYSIS · SCAN RESULT', W / 2, 190);
   // ring
   const cx = W / 2, cy = 560, r = 260;
   ctx.strokeStyle = 'rgba(33,230,255,0.15)'; ctx.lineWidth = 34;
@@ -914,34 +954,45 @@ function buildShareCard(result) {
   return c;
 }
 
+let sharing = false;
 $('btn-share').addEventListener('click', async () => {
-  if (!lastResult) return;
-  const card = buildShareCard(lastResult);
-  const shareText = `KINA scanned my posture: ${lastResult.score}/100 😳 Can you beat my score?`;
-  const blob = await new Promise(r => card.toBlob(r, 'image/png'));
-  const file = blob && new File([blob], 'posture-score.png', { type: 'image/png' });
+  if (!lastResult || sharing) return;
+  sharing = true;
+  $('btn-share').disabled = true;
   try {
-    if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
-      await navigator.share({ files: [file], text: shareText, title: 'My Posture Score' });
-      return;
-    }
+    const card = buildShareCard(lastResult);
+    const shareText = `KINA scanned my posture: ${lastResult.score}/100 😳 Can you beat my score?`;
+    const blob = await new Promise(r => card.toBlob(r, 'image/png'));
+    const file = blob && new File([blob], 'posture-score.png', { type: 'image/png' });
+
     if (navigator.share) {
-      await navigator.share({ text: shareText + ' ' + APP_URL, title: 'My Posture Score' });
+      // mobile: native share sheet. Transient failures (sheet already open,
+      // lost user activation) are no-ops — never fall through to the desktop
+      // download+popup path on a device that has a share sheet.
+      try {
+        if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+          await navigator.share({ files: [file], text: shareText, title: 'My Posture Score' });
+        } else {
+          await navigator.share({ text: shareText + ' ' + APP_URL, title: 'My Posture Score' });
+        }
+      } catch (e) { /* AbortError / NotAllowedError / InvalidStateError */ }
       return;
     }
-  } catch (e) {
-    if (e && e.name === 'AbortError') return; // user closed the share sheet
+
+    // desktop fallback: download card + open a tweet
+    if (blob) {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'posture-score.png';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    }
+    window.open('https://twitter.com/intent/tweet?text=' +
+      encodeURIComponent(shareText + ' ' + APP_URL), '_blank');
+  } finally {
+    sharing = false;
+    $('btn-share').disabled = false;
   }
-  // desktop fallback: download card + open a tweet
-  if (blob) {
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'posture-score.png';
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-  }
-  window.open('https://twitter.com/intent/tweet?text=' +
-    encodeURIComponent(shareText + ' ' + APP_URL), '_blank');
 });
 
 /* ---------- retry ---------- */
