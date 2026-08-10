@@ -10,18 +10,20 @@
 <meta property="og:image" content="https://lofikun-cpu.github.io/posture-scan/assets/og-card.png">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='40' fill='none' stroke='%2321e6ff' stroke-width='8'/%3E%3Ccircle cx='50' cy='50' r='14' fill='%2321e6ff'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='40' fill='none' stroke='%236ecbee' stroke-width='8'/%3E%3Ccircle cx='50' cy='50' r='14' fill='%236ecbee'/%3E%3C/svg%3E">
 <style>
   :root {
-    --cyan: #21e6ff;
-    --cyan-dim: rgba(33, 230, 255, 0.35);
-    --cyan-faint: rgba(33, 230, 255, 0.08);
+    /* Light-blue HUD palette */
+    --cyan: #6ecbee;
+    --cyan-hot: #a5e4f7;
+    --cyan-dim: rgba(110, 203, 238, 0.38);
+    --cyan-faint: rgba(110, 203, 238, 0.09);
     --orange: #ffb347;
-    --red: #ff4d5e;
-    --green: #3dffa0;
-    --bg: #04080f;
-    --panel: rgba(8, 20, 34, 0.82);
-    --text: #d7f5ff;
+    --red: #ff5f70;
+    --green: #5fe6b0;
+    --bg: #03070d;
+    --panel: rgba(9, 21, 33, 0.84);
+    --text: #cfe9f5;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { height: 100%; }
@@ -68,7 +70,7 @@
     background: var(--panel);
     border-radius: 10px;
     padding: 22px 20px;
-    box-shadow: 0 0 40px rgba(33, 230, 255, 0.06), inset 0 0 60px rgba(33, 230, 255, 0.03);
+    box-shadow: 0 0 40px rgba(110, 203, 238, 0.06), inset 0 0 60px rgba(110, 203, 238, 0.03);
   }
   .hud-frame::before, .hud-frame::after {
     content: ''; position: absolute; width: 18px; height: 18px; border: 2px solid var(--cyan);
@@ -96,7 +98,7 @@
   .instructions { list-style: none; margin: 14px 0 20px; }
   .instructions li {
     font-size: 13.5px; padding: 9px 0 9px 30px; position: relative;
-    border-bottom: 1px solid rgba(33, 230, 255, 0.1); color: #a8d8e8;
+    border-bottom: 1px solid rgba(110, 203, 238, 0.1); color: #a8d8e8;
   }
   .instructions li::before {
     content: attr(data-n); position: absolute; left: 0; top: 9px;
@@ -107,7 +109,7 @@
 
   .btn {
     display: block; width: 100%;
-    background: linear-gradient(180deg, rgba(33,230,255,0.16), rgba(33,230,255,0.05));
+    background: linear-gradient(180deg, rgba(110,203,238,0.16), rgba(110,203,238,0.06));
     border: 1px solid var(--cyan); color: var(--cyan);
     font-family: monospace; font-size: 15px; letter-spacing: 3px;
     padding: 16px; border-radius: 6px; cursor: pointer;
@@ -116,7 +118,7 @@
   }
   .btn:active { transform: scale(0.98); }
   .btn:disabled { opacity: 0.45; pointer-events: none; }
-  .btn:hover { background: rgba(33,230,255,0.22); box-shadow: 0 0 24px var(--cyan-dim); }
+  .btn:hover { background: rgba(110,203,238,0.24); box-shadow: 0 0 24px var(--cyan-dim); }
   .btn.secondary {
     background: none; border-color: var(--cyan-dim); color: #7fb8cc;
     font-size: 12px; padding: 12px; letter-spacing: 2px; margin-top: 10px;
@@ -140,7 +142,7 @@
     position: relative; width: 100%; aspect-ratio: 16 / 10;
     border: 1px solid var(--cyan-dim); border-radius: 8px;
     overflow: hidden; background: #01050a; margin: 4px 0 18px;
-    box-shadow: inset 0 0 60px rgba(33,230,255,0.07);
+    box-shadow: inset 0 0 60px rgba(110,203,238,0.07);
   }
   #kina-loop, #kina-core {
     position: absolute; inset: 0; width: 100%; height: 100%;
@@ -152,7 +154,7 @@
   #kina-scanlines {
     position: absolute; inset: 0; z-index: 3; pointer-events: none;
     background:
-      repeating-linear-gradient(180deg, rgba(33,230,255,0.05) 0 1px, transparent 1px 3px),
+      repeating-linear-gradient(180deg, rgba(110,203,238,0.06) 0 1px, transparent 1px 3px),
       radial-gradient(ellipse at center, transparent 45%, rgba(4,8,15,0.75) 100%);
   }
   #kina-status {
@@ -168,7 +170,7 @@
     display: none;
     font-family: monospace; font-size: 13.5px; line-height: 1.65;
     color: #fff; text-align: center;
-    border-left: 2px solid var(--cyan); background: rgba(33,230,255,0.05);
+    border-left: 2px solid var(--cyan); background: rgba(110,203,238,0.06);
     padding: 12px 14px; border-radius: 0 6px 6px 0; margin: 4px 0 16px;
     min-height: 68px;
   }
@@ -178,7 +180,7 @@
   #steps { display: flex; gap: 8px; justify-content: center; margin-bottom: 14px; }
   .step-dot {
     font-family: monospace; font-size: 9px; letter-spacing: 1.5px;
-    color: #33566b; border: 1px solid rgba(33,230,255,0.15);
+    color: #33566b; border: 1px solid rgba(110,203,238,0.17);
     padding: 5px 10px; border-radius: 3px;
   }
   .step-dot.done { color: var(--green); border-color: rgba(61,255,160,0.4); }
@@ -206,7 +208,7 @@
 
   .thumbs { display: flex; gap: 10px; margin: 12px 0 0; }
   .thumb {
-    flex: 1; border: 1px solid rgba(33,230,255,0.2); border-radius: 6px;
+    flex: 1; border: 1px solid rgba(110,203,238,0.22); border-radius: 6px;
     overflow: hidden; position: relative; background: #000; min-height: 78px;
   }
   .thumb img { width: 100%; display: block; opacity: 0.75; }
@@ -223,7 +225,7 @@
   .metric-row {
     display: flex; align-items: center; justify-content: space-between;
     font-family: monospace; font-size: 12px;
-    padding: 9px 2px; border-bottom: 1px solid rgba(33,230,255,0.1);
+    padding: 9px 2px; border-bottom: 1px solid rgba(110,203,238,0.12);
     opacity: 0; transform: translateX(-8px); transition: all 0.35s ease;
   }
   .metric-row.show { opacity: 1; transform: none; }
@@ -237,7 +239,7 @@
   .plane-head {
     font-family: monospace; font-size: 10px; letter-spacing: 2px;
     color: var(--cyan); opacity: 0.8; margin: 16px 0 4px; padding-top: 10px;
-    border-top: 1px solid rgba(33,230,255,0.15);
+    border-top: 1px solid rgba(110,203,238,0.17);
   }
   .plane-head span { float: right; color: #fff; opacity: 0.9; }
 
@@ -249,7 +251,7 @@
   /* ---------- score ---------- */
   #score-ring-wrap { display: flex; justify-content: center; margin: 10px 0 6px; }
   #score-ring { width: 220px; height: 220px; }
-  .ring-bg { fill: none; stroke: rgba(33,230,255,0.12); stroke-width: 10; }
+  .ring-bg { fill: none; stroke: rgba(110,203,238,0.14); stroke-width: 10; }
   .ring-fg {
     fill: none; stroke: var(--cyan); stroke-width: 10; stroke-linecap: round;
     filter: drop-shadow(0 0 8px var(--cyan-dim));
@@ -263,7 +265,7 @@
 
   #subscores { display: flex; gap: 10px; margin: 4px 0 8px; }
   .subscore {
-    flex: 1; text-align: center; border: 1px solid rgba(33,230,255,0.2);
+    flex: 1; text-align: center; border: 1px solid rgba(110,203,238,0.22);
     border-radius: 6px; padding: 10px 6px;
   }
   .subscore .lbl { font-family: monospace; font-size: 9px; letter-spacing: 2px; color: #6da8bd; }

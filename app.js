@@ -62,20 +62,20 @@ function showPanel(id) {
   (function loop() {
     t++;
     ctx.clearRect(0, 0, w, h);
-    ctx.strokeStyle = 'rgba(33,230,255,0.04)';
+    ctx.strokeStyle = 'rgba(110,203,238,0.05)';
     ctx.lineWidth = 1;
     for (let x = 0; x < w; x += 48) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
     for (let y = 0; y < h; y += 48) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
     for (const d of dots) {
       d.y -= d.v; if (d.y < 0) d.y = 1;
-      ctx.fillStyle = 'rgba(33,230,255,0.35)';
+      ctx.fillStyle = 'rgba(110,203,238,0.38)';
       ctx.beginPath(); ctx.arc(d.x * w, d.y * h, d.s, 0, 7); ctx.fill();
     }
     const sy = (t * 0.6) % (h + 200) - 100;
     const grad = ctx.createLinearGradient(0, sy - 60, 0, sy + 60);
-    grad.addColorStop(0, 'rgba(33,230,255,0)');
-    grad.addColorStop(0.5, 'rgba(33,230,255,0.05)');
-    grad.addColorStop(1, 'rgba(33,230,255,0)');
+    grad.addColorStop(0, 'rgba(110,203,238,0)');
+    grad.addColorStop(0.5, 'rgba(110,203,238,0.06)');
+    grad.addColorStop(1, 'rgba(110,203,238,0)');
     ctx.fillStyle = grad; ctx.fillRect(0, sy - 60, w, 120);
     requestAnimationFrame(loop);
   })();
@@ -102,82 +102,171 @@ let coreEnergy = 0; // 0 idle, 1 speaking — drives the pulse
   };
   fit(); addEventListener('resize', fit);
 
-  const arc = (cx, cy, r, from, to, w, alpha) => {
+  const BLUE = '110,203,238';
+  const HOT = '190,238,252';
+
+  const arc = (cx, cy, r, from, to, w, alpha, col = BLUE) => {
     ctx.beginPath();
     ctx.arc(cx, cy, r, from, to);
-    ctx.strokeStyle = `rgba(33,230,255,${alpha})`;
-    ctx.lineWidth = w; ctx.lineCap = 'round';
+    ctx.strokeStyle = `rgba(${col},${alpha})`;
+    ctx.lineWidth = w;
     ctx.stroke();
   };
+
+  // Telemetry strings, refreshed occasionally so the panel feels live.
+  const TELEM_L = ['SPINE.MAP', 'JOINT.VEC', 'PLUMB.REF', 'DEPTH.Z', 'MASK.SEG', 'GAIT.IDX'];
+  const telemetry = TELEM_L.map(k => ({ k, v: Math.floor(Math.random() * 900 + 100) }));
+  setInterval(() => {
+    const i = Math.floor(Math.random() * telemetry.length);
+    telemetry[i].v = Math.floor(Math.random() * 900 + 100);
+  }, 700);
+  let readout = 33;
+  setInterval(() => { readout = Math.max(11, Math.min(99, readout + (Math.random() * 12 - 6) | 0)); }, 900);
+
+  /* Smooth pseudo-random field driving the spectrum bar heights. */
+  const wave = (a, time) =>
+    0.5 + 0.5 * (
+      Math.sin(a * 7 + time * 1.7) * 0.42 +
+      Math.sin(a * 13 - time * 2.3) * 0.30 +
+      Math.sin(a * 23 + time * 3.1) * 0.18 +
+      Math.sin(a * 3 - time * 1.1) * 0.10
+    );
 
   (function frame() {
     t += 0.016;
     const W = c.width, H = c.height;
     const cx = W / 2, cy = H / 2;
-    const base = Math.min(W, H) * 0.30;
-    const pulse = 1 + Math.sin(t * 2.2) * 0.02 + coreEnergy * 0.06;
-    const R = base * pulse;
+    // Sized so the outermost tick ring (2.88 R) clears the frame edges.
+    const R = Math.min(W, H) * 0.150 * (1 + Math.sin(t * 2.1) * 0.012 + coreEnergy * 0.05);
+    const energy = 0.28 + coreEnergy * 0.72;
 
     ctx.clearRect(0, 0, W, H);
 
-    // core glow
-    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 2.4);
-    g.addColorStop(0, `rgba(33,230,255,${0.30 + coreEnergy * 0.25})`);
-    g.addColorStop(0.45, 'rgba(33,230,255,0.06)');
-    g.addColorStop(1, 'rgba(33,230,255,0)');
+    // ---- ambient glow behind the assembly
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 4);
+    g.addColorStop(0, `rgba(${BLUE},${0.16 + coreEnergy * 0.16})`);
+    g.addColorStop(0.4, `rgba(${BLUE},0.05)`);
+    g.addColorStop(1, `rgba(${BLUE},0)`);
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, W, H);
 
-    // outer segmented ring, clockwise
-    for (let i = 0; i < 5; i++) {
-      const a = t * 0.5 + i * (Math.PI * 2 / 5);
-      arc(cx, cy, R * 1.75, a, a + 0.72, Math.max(1.5, R * 0.035), 0.55);
+    // ---- radial spectrum annulus (the signature element)
+    const BARS = 132;
+    const r0 = R * 1.28;
+    // pass 1: soft wide glow, pass 2: crisp cores
+    for (const pass of [0, 1]) {
+      ctx.lineWidth = pass === 0 ? Math.max(2.5, R * 0.055) : Math.max(1, R * 0.022);
+      ctx.lineCap = 'butt';
+      for (let i = 0; i < BARS; i++) {
+        const a = (i / BARS) * Math.PI * 2 + t * 0.09;
+        const amp = wave(a, t);
+        const len = R * (0.22 + amp * 0.62 * energy);
+        const alpha = pass === 0 ? 0.10 + amp * 0.18 : 0.30 + amp * 0.55;
+        ctx.beginPath();
+        ctx.strokeStyle = `rgba(${amp > 0.72 ? HOT : BLUE},${alpha})`;
+        ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0);
+        ctx.lineTo(cx + Math.cos(a) * (r0 + len), cy + Math.sin(a) * (r0 + len));
+        ctx.stroke();
+      }
     }
-    // mid ring, counter-clockwise
-    for (let i = 0; i < 3; i++) {
-      const a = -t * 0.8 + i * (Math.PI * 2 / 3);
-      arc(cx, cy, R * 1.35, a, a + 1.15, Math.max(1, R * 0.022), 0.4);
+
+    // ---- outer segmented ring, slow clockwise
+    for (let i = 0; i < 6; i++) {
+      const a = t * 0.32 + i * (Math.PI * 2 / 6);
+      arc(cx, cy, R * 2.42, a, a + 0.62, Math.max(1.5, R * 0.05), 0.30);
     }
-    // tick marks
+    // block markers riding the outer ring
+    for (let i = 0; i < 12; i++) {
+      const a = -t * 0.18 + i * (Math.PI * 2 / 12);
+      const rr = R * 2.42;
+      const s = Math.max(2, R * 0.055);
+      ctx.fillStyle = `rgba(${BLUE},${i % 3 === 0 ? 0.65 : 0.28})`;
+      ctx.fillRect(cx + Math.cos(a) * rr - s / 2, cy + Math.sin(a) * rr - s / 2, s, s);
+    }
+
+    // ---- fine tick ring, counter-rotating
     ctx.save();
     ctx.translate(cx, cy);
-    ctx.rotate(t * 0.22);
-    for (let i = 0; i < 48; i++) {
+    ctx.rotate(-t * 0.14);
+    for (let i = 0; i < 72; i++) {
       const long = i % 6 === 0;
+      ctx.rotate(Math.PI * 2 / 72);
       ctx.beginPath();
-      ctx.rotate(Math.PI * 2 / 48);
-      ctx.moveTo(R * 2.05, 0);
-      ctx.lineTo(R * (long ? 2.22 : 2.14), 0);
-      ctx.strokeStyle = `rgba(33,230,255,${long ? 0.5 : 0.22})`;
+      ctx.moveTo(R * 2.62, 0);
+      ctx.lineTo(R * (long ? 2.88 : 2.75), 0);
+      ctx.strokeStyle = `rgba(${BLUE},${long ? 0.42 : 0.17})`;
       ctx.lineWidth = Math.max(1, R * 0.012);
       ctx.stroke();
     }
     ctx.restore();
 
-    // inner iris
-    arc(cx, cy, R * 0.95, 0, Math.PI * 2, Math.max(1.5, R * 0.03), 0.75);
-    const iris = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 0.9);
-    iris.addColorStop(0, `rgba(200,250,255,${0.85 + coreEnergy * 0.15})`);
-    iris.addColorStop(0.5, 'rgba(33,230,255,0.55)');
-    iris.addColorStop(1, 'rgba(33,230,255,0.05)');
-    ctx.fillStyle = iris;
-    ctx.beginPath(); ctx.arc(cx, cy, R * 0.9, 0, Math.PI * 2); ctx.fill();
+    // ---- dashed inner ring, clockwise
+    ctx.save();
+    ctx.setLineDash([R * 0.14, R * 0.10]);
+    arc(cx, cy, R * 1.16, t * 0.9, t * 0.9 + Math.PI * 2, Math.max(1, R * 0.02), 0.42);
+    ctx.restore();
 
-    // waveform bars while speaking
-    if (coreEnergy > 0.01) {
-      const bars = 28;
-      for (let i = 0; i < bars; i++) {
-        const a = (i / bars) * Math.PI * 2;
-        const h = R * 0.25 * coreEnergy * (0.35 + Math.abs(Math.sin(t * 6 + i * 0.7)));
-        const x0 = cx + Math.cos(a) * R * 1.05, y0 = cy + Math.sin(a) * R * 1.05;
-        const x1 = cx + Math.cos(a) * (R * 1.05 + h), y1 = cy + Math.sin(a) * (R * 1.05 + h);
-        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1);
-        ctx.strokeStyle = `rgba(33,230,255,${0.35 + coreEnergy * 0.4})`;
-        ctx.lineWidth = Math.max(1, R * 0.018);
-        ctx.stroke();
-      }
+    // ---- mechanical iris: overlapping blade arcs, slow rotation
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(t * 0.2);
+    for (let i = 0; i < 5; i++) {
+      const a = i * (Math.PI * 2 / 5);
+      ctx.beginPath();
+      ctx.arc(Math.cos(a) * R * 0.34, Math.sin(a) * R * 0.34, R * 0.55,
+              a + 0.7, a + 2.5);
+      ctx.strokeStyle = `rgba(215,235,245,${0.20 + coreEnergy * 0.15})`;
+      ctx.lineWidth = Math.max(1, R * 0.018);
+      ctx.stroke();
     }
-    coreEnergy *= 0.94; // decay unless refreshed
+    ctx.restore();
+
+    // ---- core disc
+    const iris = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 1.02);
+    iris.addColorStop(0, `rgba(${HOT},${0.30 + coreEnergy * 0.30})`);
+    iris.addColorStop(0.55, `rgba(${BLUE},0.16)`);
+    iris.addColorStop(1, `rgba(${BLUE},0.02)`);
+    ctx.fillStyle = iris;
+    ctx.beginPath(); ctx.arc(cx, cy, R * 1.02, 0, Math.PI * 2); ctx.fill();
+    arc(cx, cy, R * 1.02, 0, Math.PI * 2, Math.max(1, R * 0.022), 0.55);
+
+    // ---- centre readout
+    arc(cx, cy, R * 0.44, 0, Math.PI * 2, Math.max(1, R * 0.02), 0.7);
+    ctx.fillStyle = `rgba(235,248,255,0.92)`;
+    ctx.font = `600 ${Math.max(9, R * 0.42)}px "Consolas", monospace`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(String(readout), cx, cy + R * 0.02);
+
+    // ---- corner telemetry
+    const pad = Math.max(8, W * 0.022);
+    const fs = Math.max(7, W * 0.0165);
+    ctx.font = `${fs}px "Consolas", monospace`;
+    ctx.textBaseline = 'top';
+    ctx.textAlign = 'left';
+    telemetry.forEach((row, i) => {
+      ctx.fillStyle = `rgba(${BLUE},0.42)`;
+      ctx.fillText(row.k, pad, pad + i * fs * 1.75);
+      ctx.fillStyle = `rgba(${HOT},0.55)`;
+      ctx.fillText(String(row.v), pad + fs * 5.6, pad + i * fs * 1.75);
+    });
+    ctx.textAlign = 'right';
+    ['ALIGNMENT', 'FRONTAL', 'SAGITTAL', 'CONFIDENCE'].forEach((k, i) => {
+      ctx.fillStyle = `rgba(${BLUE},0.34)`;
+      ctx.fillText(k, W - pad, pad + i * fs * 1.75);
+    });
+
+    // ---- frame brackets
+    const bl = Math.max(10, W * 0.05);
+    ctx.strokeStyle = `rgba(${BLUE},0.5)`;
+    ctx.lineWidth = Math.max(1, W * 0.004);
+    [[pad, pad, 1, 1], [W - pad, pad, -1, 1], [pad, H - pad, 1, -1], [W - pad, H - pad, -1, -1]]
+      .forEach(([x, y, sx, sy]) => {
+        ctx.beginPath();
+        ctx.moveTo(x + sx * bl, y); ctx.lineTo(x, y); ctx.lineTo(x, y + sy * bl);
+        ctx.stroke();
+      });
+
+    coreEnergy *= 0.94; // decays unless refreshed by speech
     requestAnimationFrame(frame);
   })();
 })();
@@ -454,17 +543,17 @@ function drawScene(ctx, img, W, H, lms, progress) {
     for (const [a, b] of BONES) {
       if ((lms[a].visibility ?? 1) < 0.4 || (lms[b].visibility ?? 1) < 0.4) continue;
       const pa = P(a), pb = P(b);
-      ctx.strokeStyle = 'rgba(33,230,255,0.85)';
-      ctx.shadowColor = '#21e6ff'; ctx.shadowBlur = 10;
+      ctx.strokeStyle = 'rgba(110,203,238,0.88)';
+      ctx.shadowColor = '#6ecbee'; ctx.shadowBlur = 10;
       ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.lineTo(pb.x, pb.y); ctx.stroke();
     }
     ctx.shadowBlur = 0;
     for (const i of KEY_PTS) {
       if ((lms[i].visibility ?? 1) < 0.4) continue;
       const pt = P(i);
-      ctx.fillStyle = '#21e6ff';
+      ctx.fillStyle = '#6ecbee';
       ctx.beginPath(); ctx.arc(pt.x, pt.y, Math.max(3, W / 220), 0, 7); ctx.fill();
-      ctx.strokeStyle = 'rgba(33,230,255,0.5)';
+      ctx.strokeStyle = 'rgba(110,203,238,0.52)';
       ctx.beginPath(); ctx.arc(pt.x, pt.y, Math.max(7, W / 90), 0, 7); ctx.stroke();
     }
   }
@@ -472,12 +561,12 @@ function drawScene(ctx, img, W, H, lms, progress) {
   if (progress < 1) {
     const y = H * progress;
     const grad = ctx.createLinearGradient(0, y - 40, 0, y + 40);
-    grad.addColorStop(0, 'rgba(33,230,255,0)');
-    grad.addColorStop(0.5, 'rgba(33,230,255,0.35)');
-    grad.addColorStop(1, 'rgba(33,230,255,0)');
+    grad.addColorStop(0, 'rgba(110,203,238,0)');
+    grad.addColorStop(0.5, 'rgba(110,203,238,0.38)');
+    grad.addColorStop(1, 'rgba(110,203,238,0)');
     ctx.fillStyle = grad;
     ctx.fillRect(0, y - 40, W, 80);
-    ctx.fillStyle = 'rgba(33,230,255,0.9)';
+    ctx.fillStyle = 'rgba(110,203,238,0.92)';
     ctx.fillRect(0, y, W, 2);
   }
 }
@@ -554,13 +643,13 @@ const VIEW_COPY = {
   }
 };
 
-const GUIDE_FRONT = `<svg viewBox="0 0 100 220" fill="none" stroke="#21e6ff" stroke-width="1.4" stroke-dasharray="4 4">
+const GUIDE_FRONT = `<svg viewBox="0 0 100 220" fill="none" stroke="#6ecbee" stroke-width="1.4" stroke-dasharray="4 4">
   <circle cx="50" cy="20" r="12"/><line x1="50" y1="32" x2="50" y2="120"/>
   <line x1="28" y1="52" x2="72" y2="52"/><line x1="28" y1="52" x2="24" y2="105"/>
   <line x1="72" y1="52" x2="76" y2="105"/><line x1="34" y1="118" x2="66" y2="118"/>
   <line x1="38" y1="118" x2="36" y2="205"/><line x1="62" y1="118" x2="64" y2="205"/>
   <line x1="50" y1="0" x2="50" y2="220" stroke-width="0.7" opacity="0.5"/></svg>`;
-const GUIDE_SIDE = `<svg viewBox="0 0 100 220" fill="none" stroke="#21e6ff" stroke-width="1.4" stroke-dasharray="4 4">
+const GUIDE_SIDE = `<svg viewBox="0 0 100 220" fill="none" stroke="#6ecbee" stroke-width="1.4" stroke-dasharray="4 4">
   <circle cx="54" cy="20" r="12"/><line x1="50" y1="32" x2="50" y2="120"/>
   <line x1="50" y1="55" x2="52" y2="105"/><line x1="50" y1="118" x2="50" y2="205"/>
   <line x1="50" y1="0" x2="50" y2="220" stroke-width="0.7" opacity="0.5"/></svg>`;
@@ -948,35 +1037,35 @@ function buildSimulation() {
 function buildShareCard(result) {
   const c = $('share-canvas'), ctx = c.getContext('2d');
   const W = c.width, H = c.height;
-  ctx.fillStyle = '#04080f'; ctx.fillRect(0, 0, W, H);
-  ctx.strokeStyle = 'rgba(33,230,255,0.06)';
+  ctx.fillStyle = '#03070d'; ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = 'rgba(110,203,238,0.07)';
   for (let x = 0; x < W; x += 54) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
   for (let y = 0; y < H; y += 54) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
-  ctx.strokeStyle = '#21e6ff'; ctx.lineWidth = 3;
+  ctx.strokeStyle = '#6ecbee'; ctx.lineWidth = 3;
   ctx.strokeRect(40, 40, W - 80, H - 80);
 
-  ctx.fillStyle = '#21e6ff'; ctx.font = '600 42px monospace'; ctx.textAlign = 'center';
+  ctx.fillStyle = '#6ecbee'; ctx.font = '600 42px monospace'; ctx.textAlign = 'center';
   ctx.fillText('KINA·OS // POSTURE.SCAN', W / 2, 130);
-  ctx.fillStyle = '#6da8bd'; ctx.font = '26px monospace';
+  ctx.fillStyle = '#7fb2c6'; ctx.font = '26px monospace';
   ctx.fillText('AI POSTURE ANALYSIS · 2-VIEW SCAN', W / 2, 176);
 
   const cx = W / 2, cy = 520, r = 235;
-  ctx.strokeStyle = 'rgba(33,230,255,0.15)'; ctx.lineWidth = 32;
+  ctx.strokeStyle = 'rgba(110,203,238,0.17)'; ctx.lineWidth = 32;
   ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.stroke();
-  const col = result.score >= 75 ? '#3dffa0' : result.score >= 55 ? '#21e6ff' : result.score >= 40 ? '#ffb347' : '#ff4d5e';
+  const col = result.score >= 75 ? '#5fe6b0' : result.score >= 55 ? '#6ecbee' : result.score >= 40 ? '#ffb347' : '#ff5f70';
   ctx.strokeStyle = col; ctx.lineCap = 'round';
   ctx.shadowColor = col; ctx.shadowBlur = 30;
   ctx.beginPath(); ctx.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + (result.score / 100) * Math.PI * 2); ctx.stroke();
   ctx.shadowBlur = 0;
   ctx.fillStyle = '#fff'; ctx.font = '700 180px monospace';
   ctx.fillText(String(result.score), cx, cy + 52);
-  ctx.fillStyle = '#6da8bd'; ctx.font = '38px monospace';
+  ctx.fillStyle = '#7fb2c6'; ctx.font = '38px monospace';
   ctx.fillText('/ 100', cx, cy + 118);
 
   const v = verdictFor(result.score);
   ctx.fillStyle = '#fff'; ctx.font = '600 50px sans-serif';
   ctx.fillText(v.title.replace(/^[^\w]+\s*/, ''), W / 2, 862);
-  ctx.font = '30px monospace'; ctx.fillStyle = '#6da8bd';
+  ctx.font = '30px monospace'; ctx.fillStyle = '#7fb2c6';
   ctx.fillText(`FRONT ${result.frontScore}    ·    SIDE ${result.sideScore}`, W / 2, 918);
 
   ctx.font = '29px monospace'; ctx.textAlign = 'left';
@@ -985,17 +1074,17 @@ function buildShareCard(result) {
     .sort((a, b) => b.severity - a.severity).slice(0, 5);
   for (const m of top) {
     const b = sevBucket(m.severity);
-    ctx.fillStyle = '#a8d8e8'; ctx.fillText('▸ ' + m.name, 110, y);
-    ctx.fillStyle = ['#3dffa0', '#21e6ff', '#ffb347', '#ff4d5e'][b];
+    ctx.fillStyle = '#b8dced'; ctx.fillText('▸ ' + m.name, 110, y);
+    ctx.fillStyle = ['#5fe6b0', '#6ecbee', '#ffb347', '#ff5f70'][b];
     ctx.textAlign = 'right'; ctx.fillText(SEV_LABELS[b], W - 110, y);
     ctx.textAlign = 'left';
     y += 52;
   }
 
   ctx.textAlign = 'center';
-  ctx.fillStyle = '#21e6ff'; ctx.font = '600 36px monospace';
+  ctx.fillStyle = '#6ecbee'; ctx.font = '600 36px monospace';
   ctx.fillText('Can you beat my score?', W / 2, H - 128);
-  ctx.fillStyle = '#6da8bd'; ctx.font = '29px monospace';
+  ctx.fillStyle = '#7fb2c6'; ctx.font = '29px monospace';
   ctx.fillText(APP_URL.replace(/^https?:\/\//, ''), W / 2, H - 78);
   return c;
 }
