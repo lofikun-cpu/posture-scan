@@ -328,6 +328,10 @@ $('mute-btn').addEventListener('click', () => {
    by line length, so no manual timing table has to be maintained.
    ============================================================ */
 
+/* `pauses[i]` is the silence in seconds that follows line i in the recording
+   (the <break> tags in docs/voiceover-scripts.md). Captions are timed on
+   speech + trailing silence, so the text holds through the pause instead of
+   running ahead of the voice. Keep these in step with the script. */
 const VO_LINES = {
   intro: {
     file: ASSETS.voIntro,
@@ -338,21 +342,24 @@ const VO_LINES = {
       'Bare feet. Fitted clothing — loose fabric hides your spine from me.',
       'First photo, face me. Second, turn ninety degrees.',
       "And stand how you normally stand. I'll know if you're cheating."
-    ]
+    ],
+    pauses: [0.8, 0.7, 0.5, 0.5, 0.7, 0]
   },
   front: {
     file: ASSETS.voFront,
     lines: [
       'Frontal view. Stand square to me, arms relaxed at your sides.',
       'Look straight ahead, and hold still.'
-    ]
+    ],
+    pauses: [0.5, 0]
   },
   side: {
     file: ASSETS.voSide,
     lines: [
       'Good. Now turn ninety degrees, so one shoulder faces me.',
       'Arms hanging naturally. Do not correct your posture — I will know.'
-    ]
+    ],
+    pauses: [0.5, 0]
   }
 };
 
@@ -390,7 +397,11 @@ function playVO(key) {
   const cap = $('vo-caption');
   const stage = $('kina-stage');
   const lines = spec.lines;
-  const weights = lines.map(l => Math.max(24, l.length));
+  // Weight each caption by its spoken length plus the silence that follows it,
+  // both expressed in "character equivalents" at the reading pace below.
+  const pauses = spec.pauses || [];
+  const weights = lines.map((l, i) =>
+    Math.max(24, l.length) + ((pauses[i] || 0) * 1000) / VO_MS_PER_CHAR);
   const total = weights.reduce((a, b) => a + b, 0);
 
   let durationMs = Math.max(2400, total * VO_MS_PER_CHAR);

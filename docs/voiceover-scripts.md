@@ -16,42 +16,74 @@ const ASSETS = {
 Until a file is switched on, the app reads the same script with the browser's
 built-in voice, so nothing breaks and nothing 404s.
 
-**Keep the line breaks.** Captions on screen are split on them, and the app
-distributes each line across the real audio duration — so the words on screen
-stay in step with the audio automatically, whatever length your export is.
+**Keep the line breaks and the `<break>` tags exactly as written.** On-screen
+captions split on the line breaks, and the app times each caption using its
+spoken length *plus* the silence that follows it. Those pause values are
+mirrored in `VO_LINES[...].pauses` in `app.js` — **if you change a `<break>`
+here, change the matching number there**, or the captions will drift out of
+step with the voice.
 
 ---
 
 ## 1 · Intro briefing → `vo-intro.mp3`
 
-Target ~25 seconds. This is the one that decides whether people stay.
+Target ~28 seconds including pauses. This is the one that decides whether
+people stay. Paste exactly as-is:
 
 ```
-Good day. I am KINA — posture intelligence, online.
-I'll scan you from two angles and grade your alignment out of one hundred.
-Stand two or three steps back. I need to see you from head to feet.
-Bare feet. Fitted clothing — loose fabric hides your spine from me.
-First photo, face me. Second, turn ninety degrees.
+Good day. I am KINA — posture intelligence, online. <break time="0.8s" />
+I'll scan you from two angles and grade your alignment out of one hundred. <break time="0.7s" />
+Stand two or three steps back. I need to see you from head to feet. <break time="0.5s" />
+Bare feet. Fitted clothing — loose fabric hides your spine from me. <break time="0.5s" />
+First photo, face me. Second, turn ninety degrees. <break time="0.7s" />
 And stand how you normally stand. I'll know if you're cheating.
 ```
 
+App-side pause values: `[0.8, 0.7, 0.5, 0.5, 0.7, 0]`
+
 ## 2 · Front photo prompt → `vo-front.mp3`
-
-Target ~7 seconds.
-
-```
-Frontal view. Stand square to me, arms relaxed at your sides.
-Look straight ahead, and hold still.
-```
-
-## 3 · Side photo prompt → `vo-side.mp3`
 
 Target ~8 seconds.
 
 ```
-Good. Now turn ninety degrees, so one shoulder faces me.
+Frontal view. Stand square to me, arms relaxed at your sides. <break time="0.5s" />
+Look straight ahead, and hold still.
+```
+
+App-side pause values: `[0.5, 0]`
+
+## 3 · Side photo prompt → `vo-side.mp3`
+
+Target ~9 seconds.
+
+```
+Good. Now turn ninety degrees, so one shoulder faces me. <break time="0.5s" />
 Arms hanging naturally. Do not correct your posture — I will know.
 ```
+
+App-side pause values: `[0.5, 0]`
+
+---
+
+## About the `<break>` tags
+
+`<break time="0.8s" />` is ElevenLabs' documented syntax and gives a clean,
+exact silence — far more reliable than hoping punctuation produces a pause.
+Ceiling is 3 seconds per tag.
+
+Use them sparingly. ElevenLabs warns that heavy use of break tags can
+destabilise some voices, producing artefacts or odd breathing. Six tags across
+a 28-second read is comfortably within normal use.
+
+If a voice does misbehave on them, the fallback is punctuation — an ellipsis
+gives roughly a beat:
+
+```
+Good day. I am KINA — posture intelligence, online...
+I'll scan you from two angles and grade your alignment out of one hundred...
+```
+
+That's less precise, so re-time the `pauses` arrays by ear if you go that route.
 
 ---
 
