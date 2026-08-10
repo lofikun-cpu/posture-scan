@@ -21,6 +21,23 @@ import {
 // Format: https://apps.apple.com/app/id<APP_ID>
 const APPSTORE_URL = 'https://apps.apple.com/app/id0000000000';
 
+/* ---------- custom media ----------
+   Drop files into /assets and point these at them. Each one is optional:
+   while it's null the app uses its built-in fallback (the procedural KINA
+   core, and the browser's own voice reading the same script), so nothing
+   is ever requested that doesn't exist.
+
+   kinaLoop  — seamless looping video for the intro stage (mp4 or webm)
+   kinaPoster— first frame, shown while the video decodes
+   voIntro / voFront / voSide — ElevenLabs voiceover, one file per script  */
+const ASSETS = {
+  kinaLoop: null,   // e.g. 'assets/kina-loop.mp4'
+  kinaPoster: null, // e.g. 'assets/kina-poster.jpg'
+  voIntro: null,    // e.g. 'assets/vo-intro.mp3'
+  voFront: null,    // e.g. 'assets/vo-front.mp3'
+  voSide: null      // e.g. 'assets/vo-side.mp3'
+};
+
 const APP_URL = location.origin + location.pathname;
 
 /* ---------- helpers ---------- */
@@ -64,6 +81,121 @@ function showPanel(id) {
   })();
 })();
 
+/* ============================================================
+   KINA CORE — procedural HUD animation shown on the intro stage.
+   Replaced automatically by assets/kina-loop.(webm|mp4) when that
+   file exists, so the screen never looks empty before the custom
+   loop is dropped in.
+   ============================================================ */
+let coreEnergy = 0; // 0 idle, 1 speaking — drives the pulse
+
+(function kinaCore() {
+  const c = $('kina-core');
+  if (!c) return;
+  const ctx = c.getContext('2d');
+  let t = 0;
+  const fit = () => {
+    const r = c.getBoundingClientRect();
+    const dpr = Math.min(2, devicePixelRatio || 1);
+    c.width = Math.max(1, r.width * dpr);
+    c.height = Math.max(1, r.height * dpr);
+  };
+  fit(); addEventListener('resize', fit);
+
+  const arc = (cx, cy, r, from, to, w, alpha) => {
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, from, to);
+    ctx.strokeStyle = `rgba(33,230,255,${alpha})`;
+    ctx.lineWidth = w; ctx.lineCap = 'round';
+    ctx.stroke();
+  };
+
+  (function frame() {
+    t += 0.016;
+    const W = c.width, H = c.height;
+    const cx = W / 2, cy = H / 2;
+    const base = Math.min(W, H) * 0.30;
+    const pulse = 1 + Math.sin(t * 2.2) * 0.02 + coreEnergy * 0.06;
+    const R = base * pulse;
+
+    ctx.clearRect(0, 0, W, H);
+
+    // core glow
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 2.4);
+    g.addColorStop(0, `rgba(33,230,255,${0.30 + coreEnergy * 0.25})`);
+    g.addColorStop(0.45, 'rgba(33,230,255,0.06)');
+    g.addColorStop(1, 'rgba(33,230,255,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+
+    // outer segmented ring, clockwise
+    for (let i = 0; i < 5; i++) {
+      const a = t * 0.5 + i * (Math.PI * 2 / 5);
+      arc(cx, cy, R * 1.75, a, a + 0.72, Math.max(1.5, R * 0.035), 0.55);
+    }
+    // mid ring, counter-clockwise
+    for (let i = 0; i < 3; i++) {
+      const a = -t * 0.8 + i * (Math.PI * 2 / 3);
+      arc(cx, cy, R * 1.35, a, a + 1.15, Math.max(1, R * 0.022), 0.4);
+    }
+    // tick marks
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(t * 0.22);
+    for (let i = 0; i < 48; i++) {
+      const long = i % 6 === 0;
+      ctx.beginPath();
+      ctx.rotate(Math.PI * 2 / 48);
+      ctx.moveTo(R * 2.05, 0);
+      ctx.lineTo(R * (long ? 2.22 : 2.14), 0);
+      ctx.strokeStyle = `rgba(33,230,255,${long ? 0.5 : 0.22})`;
+      ctx.lineWidth = Math.max(1, R * 0.012);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // inner iris
+    arc(cx, cy, R * 0.95, 0, Math.PI * 2, Math.max(1.5, R * 0.03), 0.75);
+    const iris = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 0.9);
+    iris.addColorStop(0, `rgba(200,250,255,${0.85 + coreEnergy * 0.15})`);
+    iris.addColorStop(0.5, 'rgba(33,230,255,0.55)');
+    iris.addColorStop(1, 'rgba(33,230,255,0.05)');
+    ctx.fillStyle = iris;
+    ctx.beginPath(); ctx.arc(cx, cy, R * 0.9, 0, Math.PI * 2); ctx.fill();
+
+    // waveform bars while speaking
+    if (coreEnergy > 0.01) {
+      const bars = 28;
+      for (let i = 0; i < bars; i++) {
+        const a = (i / bars) * Math.PI * 2;
+        const h = R * 0.25 * coreEnergy * (0.35 + Math.abs(Math.sin(t * 6 + i * 0.7)));
+        const x0 = cx + Math.cos(a) * R * 1.05, y0 = cy + Math.sin(a) * R * 1.05;
+        const x1 = cx + Math.cos(a) * (R * 1.05 + h), y1 = cy + Math.sin(a) * (R * 1.05 + h);
+        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1);
+        ctx.strokeStyle = `rgba(33,230,255,${0.35 + coreEnergy * 0.4})`;
+        ctx.lineWidth = Math.max(1, R * 0.018);
+        ctx.stroke();
+      }
+    }
+    coreEnergy *= 0.94; // decay unless refreshed
+    requestAnimationFrame(frame);
+  })();
+})();
+
+// Fade the custom loop in over the procedural core once it decodes.
+// Nothing is requested unless ASSETS.kinaLoop is configured.
+(function kinaLoop() {
+  const v = $('kina-loop');
+  if (!v || !ASSETS.kinaLoop) return;
+  if (ASSETS.kinaPoster) v.poster = ASSETS.kinaPoster;
+  v.addEventListener('loadeddata', () => {
+    v.classList.add('ready');
+    v.play().catch(() => {});
+  });
+  v.addEventListener('error', () => { /* keep the procedural core */ });
+  v.src = ASSETS.kinaLoop;
+})();
+
 /* ---------- Jarvis voice ---------- */
 let voiceOn = true;
 let jarvisVoice = null;
@@ -99,6 +231,166 @@ $('mute-btn').addEventListener('click', () => {
   $('mute-btn').textContent = voiceOn ? 'VOICE: ON' : 'VOICE: OFF';
   if (!voiceOn && 'speechSynthesis' in window) speechSynthesis.cancel();
 });
+
+/* ============================================================
+   VOICEOVER — pre-recorded ElevenLabs audio when the file exists,
+   otherwise the browser's speech synthesis saying the same words.
+   Captions are distributed across the real audio duration weighted
+   by line length, so no manual timing table has to be maintained.
+   ============================================================ */
+
+const VO_LINES = {
+  intro: {
+    file: ASSETS.voIntro,
+    lines: [
+      'Good day. I am KINA — posture intelligence, online.',
+      "I'll scan you from two angles and grade your alignment out of one hundred.",
+      'Stand two or three steps back. I need to see you from head to feet.',
+      'Bare feet. Fitted clothing — loose fabric hides your spine from me.',
+      'First photo, face me. Second, turn ninety degrees.',
+      "And stand how you normally stand. I'll know if you're cheating."
+    ]
+  },
+  front: {
+    file: ASSETS.voFront,
+    lines: [
+      'Frontal view. Stand square to me, arms relaxed at your sides.',
+      'Look straight ahead, and hold still.'
+    ]
+  },
+  side: {
+    file: ASSETS.voSide,
+    lines: [
+      'Good. Now turn ninety degrees, so one shoulder faces me.',
+      'Arms hanging naturally. Do not correct your posture — I will know.'
+    ]
+  }
+};
+
+let activeVO = null;
+
+function stopVO() {
+  if (activeVO) {
+    try { activeVO.pause(); activeVO.currentTime = 0; } catch (e) {}
+    activeVO = null;
+  }
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
+  if (voWalkId) { cancelAnimationFrame(voWalkId); voWalkId = null; }
+  if (voCancel) { const c = voCancel; voCancel = null; c(); }
+  const cap = $('vo-caption');
+  if (cap) cap.classList.remove('on');
+  const stage = $('kina-stage');
+  if (stage) stage.classList.remove('speaking');
+}
+
+/** Reading pace used when there's no audio to sync against. */
+const VO_MS_PER_CHAR = 55;
+
+/**
+ * Plays a scripted line and walks its captions.
+ *
+ * The caption timeline is authoritative and always runs, so the briefing
+ * still reads as a briefing when the recording is missing AND the device
+ * has no speech voices (headless browsers, some Android builds). Real audio,
+ * when present, just retimes the same walk to its true duration.
+ */
+function playVO(key) {
+  const spec = VO_LINES[key];
+  if (!spec) return Promise.resolve();
+
+  const cap = $('vo-caption');
+  const stage = $('kina-stage');
+  const lines = spec.lines;
+  const weights = lines.map(l => Math.max(24, l.length));
+  const total = weights.reduce((a, b) => a + b, 0);
+
+  let durationMs = Math.max(2400, total * VO_MS_PER_CHAR);
+  let shown = -1;
+  const showChunk = (i) => {
+    if (i === shown || !cap) return;
+    shown = i;
+    cap.classList.add('on');
+    cap.textContent = lines[i];
+  };
+  const finish = () => {
+    if (cap) cap.classList.remove('on');
+    if (stage) stage.classList.remove('speaking');
+    activeVO = null;
+  };
+
+  if (stage) stage.classList.add('speaking');
+
+  return new Promise((resolve) => {
+    let cancelled = false;
+    let audio = null;
+    let audioLive = false;
+
+    if (voiceOn && spec.file) {
+      audio = new Audio(spec.file);
+      audio.addEventListener('playing', () => {
+        audioLive = true;
+        activeVO = audio;
+        if (isFinite(audio.duration) && audio.duration > 0) durationMs = audio.duration * 1000;
+      });
+      const useSpeech = () => {
+        if (audioLive || cancelled) return;
+        try { audio.pause(); audio.removeAttribute('src'); audio.load(); } catch (e) {}
+        audio = null;
+        // Fire and forget — the caption walk owns the timing.
+        speakLines(lines);
+      };
+      audio.addEventListener('error', useSpeech);
+      audio.play().catch(useSpeech);
+      setTimeout(useSpeech, 900); // recording configured but not playable
+    } else if (voiceOn) {
+      speakLines(lines); // no recording configured — built-in voice
+    }
+
+    const t0 = performance.now();
+    (function walk() {
+      if (cancelled) return;
+      const elapsed = audioLive && audio ? audio.currentTime * 1000 : performance.now() - t0;
+      const pos = Math.min(1, elapsed / durationMs);
+      coreEnergy = Math.max(coreEnergy, 0.85);
+      let acc = 0;
+      for (let i = 0; i < weights.length; i++) {
+        acc += weights[i] / total;
+        if (pos <= acc || i === weights.length - 1) { showChunk(i); break; }
+      }
+      if (pos < 1) { voWalkId = requestAnimationFrame(walk); }
+      else { finish(); resolve(); }
+    })();
+
+    voCancel = () => { cancelled = true; finish(); resolve(); };
+  });
+}
+
+let voWalkId = null;
+let voCancel = null;
+
+/** Speech-synthesis reading of the same script, chunk by chunk. */
+function speakLines(lines, onChunk) {
+  if (!voiceOn || !('speechSynthesis' in window)) return Promise.resolve();
+  return new Promise((resolve) => {
+    let i = 0;
+    // keep the core pulsing while synthesis runs — it emits no timeupdate
+    const tick = setInterval(() => { coreEnergy = Math.max(coreEnergy, 0.8); }, 120);
+    const done = () => { clearInterval(tick); resolve(); };
+    const next = () => {
+      if (i >= lines.length) return done();
+      if (onChunk) onChunk(i);
+      try {
+        const u = new SpeechSynthesisUtterance(lines[i]);
+        if (jarvisVoice) u.voice = jarvisVoice;
+        u.rate = 1.02; u.pitch = 0.82; u.volume = 0.95;
+        u.onend = () => { i++; next(); };
+        u.onerror = () => { i++; next(); };
+        speechSynthesis.speak(u);
+      } catch (e) { done(); }
+    };
+    next();
+  });
+}
 
 /* ---------- typewriter console ---------- */
 async function typeLines(el, lines, speed = 14) {
@@ -315,12 +607,44 @@ const GREET_TEXT =
 
 typeLines($('console'), GREET_TEXT.split('\n'));
 
+/* ---------- intro briefing ----------
+   Audio needs a user gesture on mobile, so the briefing starts on tap.
+   The muted loop autoplays before that; only the voiceover waits. */
+let briefingRan = false;
+
+async function runBriefing() {
+  if (briefingRan) return;
+  briefingRan = true;
+  $('btn-begin').classList.add('hidden');
+  $('btn-skip-vo').classList.remove('hidden');
+  $('intro-steps').classList.add('hidden');
+  $('console').classList.add('hidden');
+  $('kina-status').textContent = '◈ BRIEFING IN PROGRESS';
+
+  getLandmarker().catch(() => {}); // pre-warm the model during the briefing
+  await playVO('intro');
+  endBriefing();
+}
+
+function endBriefing() {
+  stopVO();
+  $('btn-skip-vo').classList.add('hidden');
+  $('btn-begin').classList.add('hidden');
+  $('btn-start').classList.remove('hidden');
+  $('intro-steps').classList.remove('hidden');
+  $('kina-status').textContent = '◈ READY WHEN YOU ARE';
+}
+
+$('btn-begin').addEventListener('click', runBriefing);
+$('btn-skip-vo').addEventListener('click', endBriefing);
+
 $('btn-start').addEventListener('click', () => {
-  say('Initiating posture scan. ' + VIEW_COPY.front.voice);
-  getLandmarker().catch(() => {}); // pre-warm while the user gets into position
+  stopVO();
+  getLandmarker().catch(() => {});
   state.want = 'front';
   renderCaptureUI();
   showPanel('panel-capture');
+  playVO('front');
 });
 
 /* ---------- upload ---------- */
@@ -470,7 +794,7 @@ async function ingest(img) {
     state.want = 'side';
     renderCaptureUI();
     $('scan-status').textContent = 'FRONTAL VIEW LOCKED ✓';
-    say(VIEW_COPY.side.voice);
+    playVO('side');
     await sleep(900);
     showPanel('panel-capture');
     if (q.warn) showWarn(q.warn);

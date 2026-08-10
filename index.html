@@ -135,6 +135,45 @@
   }
   .privacy-note b { color: var(--green); }
 
+  /* ---------- KINA core stage ---------- */
+  #kina-stage {
+    position: relative; width: 100%; aspect-ratio: 16 / 10;
+    border: 1px solid var(--cyan-dim); border-radius: 8px;
+    overflow: hidden; background: #01050a; margin: 4px 0 18px;
+    box-shadow: inset 0 0 60px rgba(33,230,255,0.07);
+  }
+  #kina-loop, #kina-core {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; display: block;
+  }
+  #kina-loop { z-index: 2; opacity: 0; transition: opacity 0.6s; }
+  #kina-loop.ready { opacity: 1; }
+  #kina-core { z-index: 1; }
+  #kina-scanlines {
+    position: absolute; inset: 0; z-index: 3; pointer-events: none;
+    background:
+      repeating-linear-gradient(180deg, rgba(33,230,255,0.05) 0 1px, transparent 1px 3px),
+      radial-gradient(ellipse at center, transparent 45%, rgba(4,8,15,0.75) 100%);
+  }
+  #kina-status {
+    position: absolute; left: 10px; bottom: 9px; z-index: 4;
+    font-family: monospace; font-size: 9.5px; letter-spacing: 2px;
+    color: var(--cyan); text-shadow: 0 0 8px var(--cyan-dim);
+  }
+  #kina-stage.speaking #kina-status { animation: pulseDim 1.1s ease-in-out infinite; }
+  @keyframes pulseDim { 50% { opacity: 0.35; } }
+
+  /* ---------- voiceover captions ---------- */
+  #vo-caption {
+    display: none;
+    font-family: monospace; font-size: 13.5px; line-height: 1.65;
+    color: #fff; text-align: center;
+    border-left: 2px solid var(--cyan); background: rgba(33,230,255,0.05);
+    padding: 12px 14px; border-radius: 0 6px 6px 0; margin: 4px 0 16px;
+    min-height: 68px;
+  }
+  #vo-caption.on { display: block; }
+
   /* ---------- progress dots ---------- */
   #steps { display: flex; gap: 8px; justify-content: center; margin-bottom: 14px; }
   .step-dot {
@@ -297,19 +336,36 @@
     <button id="mute-btn" aria-label="Toggle voice">VOICE: ON</button>
   </header>
 
-  <!-- STEP 1 · GREETING -->
+  <!-- STEP 1 · KINA INTRO -->
   <section class="panel active" id="panel-greet">
     <div class="hud-frame">
       <div class="sys-label">▸ SYSTEM ONLINE · POSTURE ANALYSIS MODULE v3.0</div>
-      <h1>How good is <span class="accent">your posture?</span></h1>
+
+      <!-- KINA core: swap in assets/kina-loop.mp4 for the custom loop.
+           Falls back to the procedural core if the file isn't present. -->
+      <div id="kina-stage">
+        <video id="kina-loop" loop muted playsinline autoplay preload="auto"></video>
+        <canvas id="kina-core"></canvas>
+        <div id="kina-scanlines"></div>
+        <div id="kina-status">◈ AWAITING OPERATOR</div>
+      </div>
+
+      <h1 id="intro-head">How good is <span class="accent">your posture?</span></h1>
       <div id="console" aria-live="polite"><span class="cursor"></span></div>
-      <ul class="instructions">
+
+      <!-- Voiceover caption track -->
+      <div id="vo-caption" aria-live="polite"></div>
+
+      <ul class="instructions" id="intro-steps">
         <li data-n="1">You'll take <b>two photos</b> — one facing me, one side-on</li>
         <li data-n="2">Stand 2–3 steps back so I can see <b>head to feet</b></li>
         <li data-n="3"><b>Barefoot</b>, in fitted clothing — loose clothes hide your spine</li>
         <li data-n="4">Stand how you <i>normally</i> stand. No cheating.</li>
       </ul>
-      <button class="btn" id="btn-start">◈ Initiate Scan</button>
+
+      <button class="btn" id="btn-begin">▶ Begin Briefing</button>
+      <button class="btn hidden" id="btn-start">◈ I'm Ready — Start Scan</button>
+      <button class="btn secondary hidden" id="btn-skip-vo">▸ Skip briefing</button>
       <div class="privacy-note"><b>●</b> 100% ON-DEVICE AI — YOUR PHOTOS NEVER LEAVE YOUR PHONE</div>
     </div>
   </section>
