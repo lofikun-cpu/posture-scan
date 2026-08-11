@@ -29,7 +29,6 @@ step with the voice.
 
 Recorded: **Edmund (British Podcast Host)**, 32.1 s including pauses. This is the
 line that decides whether people stay. Paste exactly as-is:
-people stay. Paste exactly as-is:
 
 ```
 Good day. I am KINA — posture intelligence, online. <break time="0.8s" />
@@ -74,7 +73,7 @@ Ceiling is 3 seconds per tag.
 
 Use them sparingly. ElevenLabs warns that heavy use of break tags can
 destabilise some voices, producing artefacts or odd breathing. Six tags across
-a 28-second read is comfortably within normal use.
+a 32-second read is comfortably within normal use.
 
 If a voice does misbehave on them, the fallback is punctuation — an ellipsis
 gives roughly a beat:
