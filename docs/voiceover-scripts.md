@@ -27,7 +27,8 @@ step with the voice.
 
 ## 1 · Intro briefing → `vo-intro.mp3`
 
-Target ~28 seconds including pauses. This is the one that decides whether
+Recorded: **Edmund (British Podcast Host)**, 32.1 s including pauses. This is the
+line that decides whether people stay. Paste exactly as-is:
 people stay. Paste exactly as-is:
 
 ```

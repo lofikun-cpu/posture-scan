@@ -33,7 +33,7 @@ const APPSTORE_URL = 'https://apps.apple.com/app/id0000000000';
 const ASSETS = {
   kinaLoop: null,   // e.g. 'assets/kina-loop.mp4'
   kinaPoster: null, // e.g. 'assets/kina-poster.jpg'
-  voIntro: null,    // e.g. 'assets/vo-intro.mp3'
+  voIntro: 'assets/vo-intro.mp3',
   voFront: null,    // e.g. 'assets/vo-front.mp3'
   voSide: null      // e.g. 'assets/vo-side.mp3'
 };
@@ -87,7 +87,38 @@ function showPanel(id) {
    file exists, so the screen never looks empty before the custom
    loop is dropped in.
    ============================================================ */
-let coreEnergy = 0; // 0 idle, 1 speaking — drives the pulse
+let coreEnergy = 0;       // 0 idle, 1 speaking — drives glow and bar height
+let coreAnalyser = null;  // live FFT of the voiceover, when Web Audio is available
+let audioCtx = null;
+
+/* Route the voiceover through an analyser so the spectrum ring is driven by
+   the real waveform rather than a synthetic loop. Must run after a user
+   gesture (the Begin tap), which is also what unlocks the AudioContext. */
+function attachAnalyser(el) {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    audioCtx = audioCtx || new AC();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    // Creating the source detaches the element from the default output, so
+    // once this succeeds we must reconnect it or the voiceover goes silent.
+    const src = audioCtx.createMediaElementSource(el);
+    try {
+      const an = audioCtx.createAnalyser();
+      an.fftSize = 256;                 // 128 bins — one per pair of bars
+      an.smoothingTimeConstant = 0.72;  // damped enough to read as motion, not noise
+      src.connect(an);
+      an.connect(audioCtx.destination);
+      coreAnalyser = { an, data: new Uint8Array(an.frequencyBinCount) };
+    } catch (inner) {
+      try { src.connect(audioCtx.destination); } catch (e2) {}
+      coreAnalyser = null; // visuals fall back to the synthetic field
+    }
+  } catch (e) {
+    coreAnalyser = null; // element already routed, or Web Audio unavailable
+  }
+}
+function detachAnalyser() { coreAnalyser = null; }
 
 (function kinaCore() {
   const c = $('kina-core');
@@ -134,6 +165,17 @@ let coreEnergy = 0; // 0 idle, 1 speaking — drives the pulse
 
   (function frame() {
     t += 0.016;
+
+    // Sample the live voiceover spectrum, if one is playing.
+    let spec = null;
+    if (coreAnalyser) {
+      coreAnalyser.an.getByteFrequencyData(coreAnalyser.data);
+      spec = coreAnalyser.data;
+      let sum = 0;
+      for (let i = 0; i < spec.length; i++) sum += spec[i];
+      coreEnergy = Math.max(coreEnergy, Math.min(1, (sum / spec.length) / 96));
+    }
+
     const W = c.width, H = c.height;
     const cx = W / 2, cy = H / 2;
     // Sized so the outermost tick ring (2.88 R) clears the frame edges.
@@ -152,14 +194,30 @@ let coreEnergy = 0; // 0 idle, 1 speaking — drives the pulse
 
     // ---- radial spectrum annulus (the signature element)
     const BARS = 132;
+    const HALF = BARS / 2;
     const r0 = R * 1.28;
+
+    /* Bar height. With audio playing this is the real FFT, mirrored across the
+       vertical axis so the ring reads as symmetric. Bins are mapped with a
+       curve and lifted toward the top end, because speech energy piles into
+       the low bins and would otherwise leave half the ring flat. */
+    const amplitude = (i, a) => {
+      const organic = wave(a, t);
+      if (!spec) return organic;
+      const m = i < HALF ? i : BARS - i;                    // mirror index
+      const bin = Math.floor(Math.pow(m / HALF, 1.6) * spec.length * 0.62);
+      const raw = spec[Math.min(bin, spec.length - 1)] / 255;
+      const lifted = Math.pow(raw, 0.75) * (1 + (m / HALF) * 1.6);
+      return Math.min(1, lifted * 0.82 + organic * 0.18);   // never fully dead
+    };
+
     // pass 1: soft wide glow, pass 2: crisp cores
     for (const pass of [0, 1]) {
       ctx.lineWidth = pass === 0 ? Math.max(2.5, R * 0.055) : Math.max(1, R * 0.022);
       ctx.lineCap = 'butt';
       for (let i = 0; i < BARS; i++) {
         const a = (i / BARS) * Math.PI * 2 + t * 0.09;
-        const amp = wave(a, t);
+        const amp = amplitude(i, a);
         const len = R * (0.22 + amp * 0.62 * energy);
         const alpha = pass === 0 ? 0.10 + amp * 0.18 : 0.30 + amp * 0.55;
         ctx.beginPath();
@@ -371,6 +429,7 @@ function stopVO() {
     activeVO = null;
   }
   if ('speechSynthesis' in window) speechSynthesis.cancel();
+  detachAnalyser();
   if (voWalkId) { cancelAnimationFrame(voWalkId); voWalkId = null; }
   if (voCancel) { const c = voCancel; voCancel = null; c(); }
   const cap = $('vo-caption');
@@ -431,7 +490,9 @@ function playVO(key) {
         audioLive = true;
         activeVO = audio;
         if (isFinite(audio.duration) && audio.duration > 0) durationMs = audio.duration * 1000;
+        attachAnalyser(audio); // spectrum ring now follows the real waveform
       });
+      audio.addEventListener('ended', detachAnalyser);
       const useSpeech = () => {
         if (audioLive || cancelled) return;
         try { audio.pause(); audio.removeAttribute('src'); audio.load(); } catch (e) {}
@@ -1169,5 +1230,8 @@ renderCaptureUI();
 /* Test seam — exposed only when served locally, so the browser test harness
    can drive the flow without a live camera. Never active on the deployed site. */
 if (['localhost', '127.0.0.1'].includes(location.hostname)) {
-  window.__scan = { state, ingest, runFullAnalysis, buildShareCard, warpImage, getLandmarker, showPanel };
+  window.__scan = {
+    state, ingest, runFullAnalysis, buildShareCard, warpImage, getLandmarker, showPanel,
+    audio: () => ({ energy: coreEnergy, analyser: !!coreAnalyser, ctx: audioCtx && audioCtx.state })
+  };
 }

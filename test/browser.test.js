@@ -11,7 +11,8 @@ const check = (n, c, x = '') => {
 (async () => {
   const browser = await chromium.launch({
     executablePath: '/opt/pw-browsers/chromium',
-    args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader']
+    args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader',
+           '--autoplay-policy=no-user-gesture-required']
   });
   const page = await browser.newPage({ viewport: { width: 420, height: 900 } });
   const errors = [];
@@ -112,7 +113,11 @@ const check = (n, c, x = '') => {
         !(await page.getAttribute('#kina-loop', 'class') || '').includes('ready'));
 
   await page.click('#btn-begin');
-  await page.waitForTimeout(700);
+  await page.waitForTimeout(2500);
+  const au = await page.evaluate(() => window.__scan.audio());
+  console.log('     audio:', JSON.stringify(au));
+  check('voiceover audio is driving the core', au.energy > 0.02, JSON.stringify(au));
+  check('analyser attached to the voiceover', au.analyser, JSON.stringify(au));
   check('briefing shows a caption',
         (await page.textContent('#vo-caption')).trim().length > 10,
         await page.textContent('#vo-caption'));
