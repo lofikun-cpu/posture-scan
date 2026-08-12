@@ -246,6 +246,10 @@ function getVONode(key, file) {
 
   const BLUE = '110,203,238';
   const HOT = '190,238,252';
+  // Secondary accents from the reference: a lime ring and magenta markers
+  // riding over the blue base.
+  const LIME = '186,232,88';
+  const MAGENTA = '255,96,178';
 
   const arc = (cx, cy, r, from, to, w, alpha, col = BLUE) => {
     ctx.beginPath();
@@ -280,6 +284,20 @@ function getVONode(key, file) {
     { label: 'PLUMB REFERENCE', at: 0.72 },
     { label: 'SPINAL CURVE MAP', at: 0.82 }
   ];
+
+  /* Status callouts that cycle around the assembly, matching the reference's
+     running commentary ("SCANNING FOR USER DEVICES", "RETINA SCAN"...). */
+  const CALLOUTS = [
+    'SCANNING FOR SUBJECT',
+    'JOINT VECTOR LOCK',
+    'DEPTH FIELD STABLE',
+    'PLUMB LINE ACQUIRED',
+    'SEGMENTING SILHOUETTE',
+    'CURVE FIT NOMINAL',
+    'GRADING CHECKPOINTS',
+    'CALIBRATION HELD'
+  ];
+  let calloutIdx = 0, calloutAt = 0;
 
   /* Smooth pseudo-random field driving the spectrum bar heights. */
   const wave = (a, time) =>
@@ -412,6 +430,40 @@ function getVONode(key, file) {
       ctx.fillRect(cx + Math.cos(a) * rr - s / 2, cy + Math.sin(a) * rr - s / 2, s, s);
     }
 
+    // ---- lime accent ring with tick segments, riding above the spectrum
+    const limeIn = ph(b, 0.44, 0.78);
+    if (limeIn > 0.001) {
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(t * 0.42);
+      const lr = R * 2.08;
+      for (let i = 0; i < 40; i++) {
+        ctx.rotate(Math.PI * 2 / 40);
+        if (i / 40 > limeIn) continue;
+        const long = i % 5 === 0;
+        ctx.beginPath();
+        ctx.moveTo(lr, 0);
+        ctx.lineTo(lr + R * (long ? 0.16 : 0.09), 0);
+        ctx.strokeStyle = `rgba(${LIME},${(long ? 0.75 : 0.34) * limeIn})`;
+        ctx.lineWidth = Math.max(1, R * 0.028);
+        ctx.stroke();
+      }
+      ctx.restore();
+      // a bright partial arc sweeping around that ring
+      arc(cx, cy, lr, t * 0.42, t * 0.42 + 1.05 * limeIn,
+          Math.max(1.5, R * 0.035), 0.65 * limeIn, LIME);
+    }
+
+    // ---- magenta marker arcs, counter-rotating
+    const magIn = ph(b, 0.55, 0.85);
+    if (magIn > 0.001) {
+      for (let i = 0; i < 2; i++) {
+        const a = -t * 0.62 + i * Math.PI;
+        arc(cx, cy, R * 1.72, a, a + 0.42 * magIn,
+            Math.max(1.5, R * 0.045), 0.62 * magIn, MAGENTA);
+      }
+    }
+
     // ---- fine tick ring, counter-rotating (sweeps into existence)
     const tickIn = ph(b, 0.38, 0.7);
     ctx.save();
@@ -508,6 +560,25 @@ function getVONode(key, file) {
       ctx.fillStyle = `rgba(${flash > 0.05 ? HOT : BLUE},${(0.30 + flash * 0.5) * on})`;
       ctx.fillText('▸ ' + m.label + '  ONLINE', pad, y);
     });
+
+    // ---- running status callout, mid-right, cycling with a flash on change
+    if (b > 0.8) {
+      if (t - calloutAt > 2.2) { calloutAt = t; calloutIdx = (calloutIdx + 1) % CALLOUTS.length; }
+      const age = t - calloutAt;
+      const flash = 1 - clamp(age / 0.28, 0, 1);
+      ctx.textAlign = 'right';
+      ctx.font = `${fs * 1.05}px "Consolas", monospace`;
+      ctx.fillStyle = flash > 0.05 ? `rgba(${HOT},0.95)` : `rgba(${LIME},0.62)`;
+      ctx.fillText('◂ ' + CALLOUTS[calloutIdx], W - pad, cy - fs * 0.6);
+      // underline that wipes in with each new line
+      const uw = fs * 7 * clamp(age / 0.5, 0, 1);
+      ctx.strokeStyle = `rgba(${LIME},0.4)`;
+      ctx.lineWidth = Math.max(1, W * 0.002);
+      ctx.beginPath();
+      ctx.moveTo(W - pad, cy + fs * 0.9);
+      ctx.lineTo(W - pad - uw, cy + fs * 0.9);
+      ctx.stroke();
+    }
 
     // ---- frame brackets
     const bl = Math.max(10, W * 0.05) * ph(b, 0.7, 1.0);
