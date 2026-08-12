@@ -91,34 +91,62 @@ let coreEnergy = 0;       // 0 idle, 1 speaking — drives glow and bar height
 let coreAnalyser = null;  // live FFT of the voiceover, when Web Audio is available
 let audioCtx = null;
 
-/* Route the voiceover through an analyser so the spectrum ring is driven by
-   the real waveform rather than a synthetic loop. Must run after a user
-   gesture (the Begin tap), which is also what unlocks the AudioContext. */
-function attachAnalyser(el) {
+/* Audio must be unlocked from inside the tap handler itself — creating or
+   resuming an AudioContext asynchronously afterwards leaves it suspended on
+   iOS. Call this synchronously from the Begin gesture. */
+function unlockAudio() {
   try {
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
     audioCtx = audioCtx || new AC();
     if (audioCtx.state === 'suspended') audioCtx.resume();
-    // Creating the source detaches the element from the default output, so
-    // once this succeeds we must reconnect it or the voiceover goes silent.
-    const src = audioCtx.createMediaElementSource(el);
+    // iOS 16.4+: spoken content should ignore the ringer switch.
+    if (navigator.audioSession) {
+      try { navigator.audioSession.type = 'playback'; } catch (e) {}
+    }
+  } catch (e) { audioCtx = null; }
+}
+
+/* Route a voiceover element through an analyser so the spectrum ring follows
+   the real waveform. Only ever done on a RUNNING context: createMediaElement-
+   Source detaches the element from the default output, so wiring it up while
+   the context is suspended would play the briefing into silence. Each element
+   can only be sourced once, so the node is cached alongside it. */
+function wireAnalyser(node) {
+  if (node.analyser || node.wired) return;
+  if (!audioCtx || audioCtx.state !== 'running') return; // leave it on the speaker
+  node.wired = true;
+  try {
+    const src = audioCtx.createMediaElementSource(node.el);
     try {
       const an = audioCtx.createAnalyser();
       an.fftSize = 256;                 // 128 bins — one per pair of bars
       an.smoothingTimeConstant = 0.72;  // damped enough to read as motion, not noise
       src.connect(an);
       an.connect(audioCtx.destination);
-      coreAnalyser = { an, data: new Uint8Array(an.frequencyBinCount) };
+      node.analyser = an;
+      node.data = new Uint8Array(an.frequencyBinCount);
     } catch (inner) {
       try { src.connect(audioCtx.destination); } catch (e2) {}
-      coreAnalyser = null; // visuals fall back to the synthetic field
     }
-  } catch (e) {
-    coreAnalyser = null; // element already routed, or Web Audio unavailable
-  }
+  } catch (e) { /* already sourced, or unsupported — audio still plays */ }
 }
 function detachAnalyser() { coreAnalyser = null; }
+
+/* Preloaded voiceover elements, so a tap plays instantly instead of waiting
+   on the network with a fallback timer racing it. */
+const voNodes = {};
+function getVONode(key, file) {
+  if (!file) return null;
+  if (!voNodes[key]) {
+    const el = new Audio();
+    el.preload = 'auto';
+    el.playsInline = true;
+    el.src = file;
+    voNodes[key] = { el, analyser: null, data: null, wired: false };
+  }
+  return voNodes[key];
+}
 
 (function kinaCore() {
   const c = $('kina-core');
@@ -475,6 +503,7 @@ function playVO(key) {
     if (cap) cap.classList.remove('on');
     if (stage) stage.classList.remove('speaking');
     activeVO = null;
+    coreAnalyser = null;
   };
 
   if (stage) stage.classList.add('speaking');
@@ -484,25 +513,43 @@ function playVO(key) {
     let audio = null;
     let audioLive = false;
 
-    if (voiceOn && spec.file) {
-      audio = new Audio(spec.file);
-      audio.addEventListener('playing', () => {
+    const node = voiceOn ? getVONode(key, spec.file) : null;
+
+    if (node) {
+      audio = node.el;
+      wireAnalyser(node); // no-op unless the context is already running
+      coreAnalyser = node.analyser ? { an: node.analyser, data: node.data } : null;
+
+      const onPlaying = () => {
         audioLive = true;
         activeVO = audio;
         if (isFinite(audio.duration) && audio.duration > 0) durationMs = audio.duration * 1000;
-        attachAnalyser(audio); // spectrum ring now follows the real waveform
-      });
-      audio.addEventListener('ended', detachAnalyser);
+      };
       const useSpeech = () => {
         if (audioLive || cancelled) return;
-        try { audio.pause(); audio.removeAttribute('src'); audio.load(); } catch (e) {}
+        try { audio.pause(); } catch (e) {}
         audio = null;
-        // Fire and forget — the caption walk owns the timing.
-        speakLines(lines);
+        coreAnalyser = null;
+        speakLines(lines); // fire and forget — the caption walk owns the timing
       };
-      audio.addEventListener('error', useSpeech);
+      // Surface a silent failure instead of leaving the user staring at a
+      // muted screen wondering whether they broke it.
+      audio.addEventListener('playing', () => {
+        $('kina-status').textContent = '◈ KINA SPEAKING';
+      }, { once: true });
+      setTimeout(() => {
+        if (!audioLive && !cancelled) {
+          $('kina-status').textContent = '◈ NO AUDIO — CHECK RINGER / TAP SKIP';
+        }
+      }, 2500);
+      audio.addEventListener('playing', onPlaying, { once: true });
+      audio.addEventListener('error', useSpeech, { once: true });
+      try { audio.currentTime = 0; } catch (e) {}
       audio.play().catch(useSpeech);
-      setTimeout(useSpeech, 900); // recording configured but not playable
+      // Generous last resort: the file is preloaded, so this should never fire
+      // on a working connection. Short timers here used to kill a slow-loading
+      // recording mid-buffer.
+      setTimeout(useSpeech, 6000);
     } else if (voiceOn) {
       speakLines(lines); // no recording configured — built-in voice
     }
@@ -776,7 +823,9 @@ let briefingRan = false;
 async function runBriefing() {
   if (briefingRan) return;
   briefingRan = true;
+  unlockAudio(); // must happen inside the tap, before anything async
   $('btn-begin').classList.add('hidden');
+  $('sound-hint').classList.add('hidden');
   $('btn-skip-vo').classList.remove('hidden');
   $('intro-steps').classList.add('hidden');
   $('console').classList.add('hidden');
@@ -800,6 +849,7 @@ $('btn-begin').addEventListener('click', runBriefing);
 $('btn-skip-vo').addEventListener('click', endBriefing);
 
 $('btn-start').addEventListener('click', () => {
+  unlockAudio(); // covers users who skip the briefing entirely
   stopVO();
   getLandmarker().catch(() => {});
   state.want = 'front';
@@ -1226,12 +1276,21 @@ function updateCta() {
 
 updateCta();
 renderCaptureUI();
+// Start buffering the voiceover now so the Begin tap plays instantly.
+Object.entries(VO_LINES).forEach(([k, s]) => getVONode(k, s.file));
 
 /* Test seam — exposed only when served locally, so the browser test harness
    can drive the flow without a live camera. Never active on the deployed site. */
 if (['localhost', '127.0.0.1'].includes(location.hostname)) {
   window.__scan = {
     state, ingest, runFullAnalysis, buildShareCard, warpImage, getLandmarker, showPanel,
-    audio: () => ({ energy: coreEnergy, analyser: !!coreAnalyser, ctx: audioCtx && audioCtx.state })
+    audio: () => ({
+      energy: coreEnergy,
+      analyser: !!coreAnalyser,
+      ctx: audioCtx && audioCtx.state,
+      t: activeVO ? activeVO.currentTime : null,
+      paused: activeVO ? activeVO.paused : null,
+      muted: activeVO ? (activeVO.muted || activeVO.volume === 0) : null
+    })
   };
 }

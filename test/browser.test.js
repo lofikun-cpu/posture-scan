@@ -118,6 +118,11 @@ const check = (n, c, x = '') => {
   console.log('     audio:', JSON.stringify(au));
   check('voiceover audio is driving the core', au.energy > 0.02, JSON.stringify(au));
   check('analyser attached to the voiceover', au.analyser, JSON.stringify(au));
+  // The bug this guards: routing through Web Audio detached the element from
+  // the speaker, so playback "worked" while producing no sound at all.
+  check('playback is actually progressing', au.t > 0.5, JSON.stringify(au));
+  check('element is playing, not paused', au.paused === false, JSON.stringify(au));
+  check('output is not muted', au.muted === false, JSON.stringify(au));
   check('briefing shows a caption',
         (await page.textContent('#vo-caption')).trim().length > 10,
         await page.textContent('#vo-caption'));
