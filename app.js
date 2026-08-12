@@ -182,6 +182,22 @@ function getVONode(key, file) {
   let readout = 33;
   setInterval(() => { readout = Math.max(11, Math.min(99, readout + (Math.random() * 12 - 6) | 0)); }, 900);
 
+  /* ---- boot sequence ----
+     Plays once on load: a point ignites, a shockwave blooms outward, then the
+     rings, spectrum, scan modules and telemetry assemble in sequence before
+     settling into the steady core. */
+  const BOOT_MS = 3600;
+  const bootStart = performance.now();
+  const easeOut = (x) => 1 - Math.pow(1 - x, 3);
+  // ramp from 0→1 across a slice of the boot timeline
+  const ph = (b, from, to) => easeOut(clamp((b - from) / (to - from), 0, 1));
+
+  const SCAN_MODULES = [
+    { label: 'SKELETAL TRACE', at: 0.62 },
+    { label: 'PLUMB REFERENCE', at: 0.72 },
+    { label: 'SPINAL CURVE MAP', at: 0.82 }
+  ];
+
   /* Smooth pseudo-random field driving the spectrum bar heights. */
   const wave = (a, time) =>
     0.5 + 0.5 * (
@@ -206,16 +222,53 @@ function getVONode(key, file) {
 
     const W = c.width, H = c.height;
     const cx = W / 2, cy = H / 2;
+    const b = Math.min(1, (performance.now() - bootStart) / BOOT_MS);
+
     // Sized so the outermost tick ring (2.88 R) clears the frame edges.
-    const R = Math.min(W, H) * 0.150 * (1 + Math.sin(t * 2.1) * 0.012 + coreEnergy * 0.05);
+    const Rsteady = Math.min(W, H) * 0.150 * (1 + Math.sin(t * 2.1) * 0.012 + coreEnergy * 0.05);
+    // The assembly falls in from oversize as it locks on.
+    const R = Rsteady * (1 + (1 - ph(b, 0.28, 0.72)) * 0.9);
     const energy = 0.28 + coreEnergy * 0.72;
 
     ctx.clearRect(0, 0, W, H);
 
+    // ---- ignition flash: a hot point that blooms and fades
+    const ignite = 1 - clamp((b - 0.02) / 0.22, 0, 1);
+    if (ignite > 0.001) {
+      const fr = Math.min(W, H) * (0.02 + (1 - ignite) * 0.55);
+      const fg = ctx.createRadialGradient(cx, cy, 0, cx, cy, fr);
+      fg.addColorStop(0, `rgba(255,255,255,${0.95 * ignite})`);
+      fg.addColorStop(0.25, `rgba(${HOT},${0.8 * ignite})`);
+      fg.addColorStop(1, `rgba(${BLUE},0)`);
+      ctx.fillStyle = fg;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // ---- shockwave ring travelling outward from the ignition
+    const sw = clamp((b - 0.04) / 0.5, 0, 1);
+    if (sw > 0 && sw < 1) {
+      const sr = easeOut(sw) * Math.min(W, H) * 0.85;
+      ctx.beginPath();
+      ctx.arc(cx, cy, sr, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(${HOT},${(1 - sw) * 0.55})`;
+      ctx.lineWidth = Math.max(1, (1 - sw) * Math.min(W, H) * 0.02);
+      ctx.stroke();
+      // radial streaks chasing the wave
+      ctx.lineWidth = Math.max(1, (1 - sw) * 3);
+      for (let i = 0; i < 24; i++) {
+        const a = (i / 24) * Math.PI * 2 + 0.2;
+        ctx.beginPath();
+        ctx.strokeStyle = `rgba(${BLUE},${(1 - sw) * 0.3})`;
+        ctx.moveTo(cx + Math.cos(a) * sr * 0.72, cy + Math.sin(a) * sr * 0.72);
+        ctx.lineTo(cx + Math.cos(a) * sr, cy + Math.sin(a) * sr);
+        ctx.stroke();
+      }
+    }
+
     // ---- ambient glow behind the assembly
     const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 4);
-    g.addColorStop(0, `rgba(${BLUE},${0.16 + coreEnergy * 0.16})`);
-    g.addColorStop(0.4, `rgba(${BLUE},0.05)`);
+    g.addColorStop(0, `rgba(${BLUE},${(0.16 + coreEnergy * 0.16) * ph(b, 0.05, 0.4)})`);
+    g.addColorStop(0.4, `rgba(${BLUE},${0.05 * ph(b, 0.05, 0.4)})`);
     g.addColorStop(1, `rgba(${BLUE},0)`);
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, W, H);
@@ -239,44 +292,52 @@ function getVONode(key, file) {
       return Math.min(1, lifted * 0.82 + organic * 0.18);   // never fully dead
     };
 
-    // pass 1: soft wide glow, pass 2: crisp cores
-    for (const pass of [0, 1]) {
-      ctx.lineWidth = pass === 0 ? Math.max(2.5, R * 0.055) : Math.max(1, R * 0.022);
-      ctx.lineCap = 'butt';
-      for (let i = 0; i < BARS; i++) {
-        const a = (i / BARS) * Math.PI * 2 + t * 0.09;
-        const amp = amplitude(i, a);
-        const len = R * (0.22 + amp * 0.62 * energy);
-        const alpha = pass === 0 ? 0.10 + amp * 0.18 : 0.30 + amp * 0.55;
-        ctx.beginPath();
-        ctx.strokeStyle = `rgba(${amp > 0.72 ? HOT : BLUE},${alpha})`;
-        ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0);
-        ctx.lineTo(cx + Math.cos(a) * (r0 + len), cy + Math.sin(a) * (r0 + len));
-        ctx.stroke();
+    // Bars grow out of nothing as the spectrum comes online.
+    const specIn = ph(b, 0.5, 0.88);
+    if (specIn > 0.001) {
+      // pass 1: soft wide glow, pass 2: crisp cores
+      for (const pass of [0, 1]) {
+        ctx.lineWidth = pass === 0 ? Math.max(2.5, R * 0.055) : Math.max(1, R * 0.022);
+        ctx.lineCap = 'butt';
+        for (let i = 0; i < BARS; i++) {
+          const a = (i / BARS) * Math.PI * 2 + t * 0.09;
+          const amp = amplitude(i, a);
+          const len = R * (0.22 + amp * 0.62 * energy) * specIn;
+          const alpha = (pass === 0 ? 0.10 + amp * 0.18 : 0.30 + amp * 0.55) * specIn;
+          ctx.beginPath();
+          ctx.strokeStyle = `rgba(${amp > 0.72 ? HOT : BLUE},${alpha})`;
+          ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0);
+          ctx.lineTo(cx + Math.cos(a) * (r0 + len), cy + Math.sin(a) * (r0 + len));
+          ctx.stroke();
+        }
       }
     }
 
-    // ---- outer segmented ring, slow clockwise
+    // ---- outer segmented ring, slow clockwise (locks in first)
+    const outIn = ph(b, 0.26, 0.56);
     for (let i = 0; i < 6; i++) {
       const a = t * 0.32 + i * (Math.PI * 2 / 6);
-      arc(cx, cy, R * 2.42, a, a + 0.62, Math.max(1.5, R * 0.05), 0.30);
+      arc(cx, cy, R * 2.42, a, a + 0.62 * outIn, Math.max(1.5, R * 0.05), 0.30 * outIn);
     }
     // block markers riding the outer ring
     for (let i = 0; i < 12; i++) {
+      if (i / 12 > outIn) continue;
       const a = -t * 0.18 + i * (Math.PI * 2 / 12);
       const rr = R * 2.42;
       const s = Math.max(2, R * 0.055);
-      ctx.fillStyle = `rgba(${BLUE},${i % 3 === 0 ? 0.65 : 0.28})`;
+      ctx.fillStyle = `rgba(${BLUE},${(i % 3 === 0 ? 0.65 : 0.28) * outIn})`;
       ctx.fillRect(cx + Math.cos(a) * rr - s / 2, cy + Math.sin(a) * rr - s / 2, s, s);
     }
 
-    // ---- fine tick ring, counter-rotating
+    // ---- fine tick ring, counter-rotating (sweeps into existence)
+    const tickIn = ph(b, 0.38, 0.7);
     ctx.save();
     ctx.translate(cx, cy);
     ctx.rotate(-t * 0.14);
     for (let i = 0; i < 72; i++) {
-      const long = i % 6 === 0;
       ctx.rotate(Math.PI * 2 / 72);
+      if (i / 72 > tickIn) continue;
+      const long = i % 6 === 0;
       ctx.beginPath();
       ctx.moveTo(R * 2.62, 0);
       ctx.lineTo(R * (long ? 2.88 : 2.75), 0);
@@ -287,49 +348,59 @@ function getVONode(key, file) {
     ctx.restore();
 
     // ---- dashed inner ring, clockwise
-    ctx.save();
-    ctx.setLineDash([R * 0.14, R * 0.10]);
-    arc(cx, cy, R * 1.16, t * 0.9, t * 0.9 + Math.PI * 2, Math.max(1, R * 0.02), 0.42);
-    ctx.restore();
+    const dashIn = ph(b, 0.46, 0.74);
+    if (dashIn > 0.001) {
+      ctx.save();
+      ctx.setLineDash([R * 0.14, R * 0.10]);
+      arc(cx, cy, R * 1.16, t * 0.9, t * 0.9 + Math.PI * 2 * dashIn,
+          Math.max(1, R * 0.02), 0.42 * dashIn);
+      ctx.restore();
+    }
 
     // ---- mechanical iris: overlapping blade arcs, slow rotation
+    const irisIn = ph(b, 0.34, 0.66);
     ctx.save();
     ctx.translate(cx, cy);
-    ctx.rotate(t * 0.2);
+    ctx.rotate(t * 0.2 + (1 - irisIn) * 1.2); // unwinds into place
     for (let i = 0; i < 5; i++) {
       const a = i * (Math.PI * 2 / 5);
       ctx.beginPath();
-      ctx.arc(Math.cos(a) * R * 0.34, Math.sin(a) * R * 0.34, R * 0.55,
-              a + 0.7, a + 2.5);
-      ctx.strokeStyle = `rgba(215,235,245,${0.20 + coreEnergy * 0.15})`;
+      ctx.arc(Math.cos(a) * R * 0.34, Math.sin(a) * R * 0.34, R * 0.55, a + 0.7, a + 2.5);
+      ctx.strokeStyle = `rgba(215,235,245,${(0.20 + coreEnergy * 0.15) * irisIn})`;
       ctx.lineWidth = Math.max(1, R * 0.018);
       ctx.stroke();
     }
     ctx.restore();
 
     // ---- core disc
+    const coreIn = ph(b, 0.10, 0.45);
     const iris = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 1.02);
-    iris.addColorStop(0, `rgba(${HOT},${0.30 + coreEnergy * 0.30})`);
-    iris.addColorStop(0.55, `rgba(${BLUE},0.16)`);
+    iris.addColorStop(0, `rgba(${HOT},${(0.30 + coreEnergy * 0.30) * coreIn})`);
+    iris.addColorStop(0.55, `rgba(${BLUE},${0.16 * coreIn})`);
     iris.addColorStop(1, `rgba(${BLUE},0.02)`);
     ctx.fillStyle = iris;
     ctx.beginPath(); ctx.arc(cx, cy, R * 1.02, 0, Math.PI * 2); ctx.fill();
-    arc(cx, cy, R * 1.02, 0, Math.PI * 2, Math.max(1, R * 0.022), 0.55);
+    arc(cx, cy, R * 1.02, 0, Math.PI * 2, Math.max(1, R * 0.022), 0.55 * coreIn);
 
     // ---- centre readout
-    arc(cx, cy, R * 0.44, 0, Math.PI * 2, Math.max(1, R * 0.02), 0.7);
-    ctx.fillStyle = `rgba(235,248,255,0.92)`;
-    ctx.font = `600 ${Math.max(9, R * 0.42)}px "Consolas", monospace`;
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(String(readout), cx, cy + R * 0.02);
+    const readIn = ph(b, 0.55, 0.8);
+    if (readIn > 0.001) {
+      arc(cx, cy, R * 0.44, 0, Math.PI * 2, Math.max(1, R * 0.02), 0.7 * readIn);
+      ctx.fillStyle = `rgba(235,248,255,${0.92 * readIn})`;
+      ctx.font = `600 ${Math.max(9, R * 0.42)}px "Consolas", monospace`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(String(readout), cx, cy + R * 0.02);
+    }
 
-    // ---- corner telemetry
+    // ---- corner telemetry, revealed row by row
     const pad = Math.max(8, W * 0.022);
     const fs = Math.max(7, W * 0.0165);
     ctx.font = `${fs}px "Consolas", monospace`;
     ctx.textBaseline = 'top';
     ctx.textAlign = 'left';
+    const telIn = ph(b, 0.62, 1.0);
     telemetry.forEach((row, i) => {
+      if (i / telemetry.length > telIn) return;
       ctx.fillStyle = `rgba(${BLUE},0.42)`;
       ctx.fillText(row.k, pad, pad + i * fs * 1.75);
       ctx.fillStyle = `rgba(${HOT},0.55)`;
@@ -337,13 +408,27 @@ function getVONode(key, file) {
     });
     ctx.textAlign = 'right';
     ['ALIGNMENT', 'FRONTAL', 'SAGITTAL', 'CONFIDENCE'].forEach((k, i) => {
+      if (i / 4 > telIn) return;
       ctx.fillStyle = `rgba(${BLUE},0.34)`;
       ctx.fillText(k, W - pad, pad + i * fs * 1.75);
     });
 
+    // ---- scan modules coming online, bottom-left, one after another
+    ctx.textAlign = 'left';
+    SCAN_MODULES.forEach((m, i) => {
+      const on = clamp((b - m.at) / 0.1, 0, 1);
+      if (on <= 0) return;
+      // offset clears the status line pinned to the bottom of the stage
+      const y = H - pad - fs * 1.75 * (SCAN_MODULES.length - i) - fs * 3.4;
+      // brief flash as each module reports in
+      const flash = 1 - clamp((b - m.at) / 0.16, 0, 1);
+      ctx.fillStyle = `rgba(${flash > 0.05 ? HOT : BLUE},${(0.30 + flash * 0.5) * on})`;
+      ctx.fillText('▸ ' + m.label + '  ONLINE', pad, y);
+    });
+
     // ---- frame brackets
-    const bl = Math.max(10, W * 0.05);
-    ctx.strokeStyle = `rgba(${BLUE},0.5)`;
+    const bl = Math.max(10, W * 0.05) * ph(b, 0.7, 1.0);
+    ctx.strokeStyle = `rgba(${BLUE},${0.5 * ph(b, 0.7, 1.0)})`;
     ctx.lineWidth = Math.max(1, W * 0.004);
     [[pad, pad, 1, 1], [W - pad, pad, -1, 1], [pad, H - pad, 1, -1], [W - pad, H - pad, -1, -1]]
       .forEach(([x, y, sx, sy]) => {
