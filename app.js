@@ -92,6 +92,7 @@ function showPanel(id) {
    be in the temporal dead zone on the first frames. */
 let modelProgress = 0;    // 0–1 while the pose model downloads
 let modelLoading = false;
+let activeVO = null;      // voiceover element currently playing
 
 let coreEnergy = 0;       // 0 idle, 1 speaking — drives glow and bar height
 let coreAnalyser = null;  // live FFT of the voiceover, when Web Audio is available
@@ -380,6 +381,117 @@ function getVONode(key, file) {
       Math.sin(a * 3 - time * 1.1) * 0.10
     );
 
+  /* ---- display modes ----
+     The reference cycles through distinct screens rather than holding one
+     assembly: a ring core, an iris/retina scan, a geographic projection with
+     pings, and crosshatched data panels. Each collapses toward centre and the
+     next builds out of it. While KINA is speaking we stay on the ring, since
+     that's the mode whose spectrum is driven by the voice. */
+  const MODES = ['ring', 'iris', 'globe', 'panels'];
+  const MODE_IN = 0.55, MODE_HOLD = 6.0, MODE_OUT = 0.45;
+  const MODE_CYCLE = MODE_IN + MODE_HOLD + MODE_OUT;
+  let modeIdx = 0, modeStart = 0, lastSwitch = -9;
+
+  const MODE_LABEL = {
+    ring: 'ALIGNMENT CORE', iris: 'OPTICAL CALIBRATION',
+    globe: 'REFERENCE FRAME', panels: 'DATA CHANNELS'
+  };
+
+  function drawIris(cx, cy, R, k) {
+    // concentric lens rings with radial spokes and a hot pupil
+    for (let i = 0; i < 6; i++) {
+      const rr = R * (0.55 + i * 0.42);
+      arc(cx, cy, rr, t * (i % 2 ? -0.3 : 0.3) + i, t * (i % 2 ? -0.3 : 0.3) + i + 5.2,
+          Math.max(1, R * 0.03), (0.5 - i * 0.05), i === 2 ? LIME : BLUE);
+    }
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(t * 0.5);
+    for (let i = 0; i < 60; i++) {
+      ctx.rotate(Math.PI * 2 / 60);
+      const long = i % 5 === 0;
+      ctx.beginPath();
+      ctx.moveTo(R * 1.05, 0); ctx.lineTo(R * (long ? 1.45 : 1.25), 0);
+      ctx.strokeStyle = `rgba(${long ? LIME : BLUE},${long ? 0.6 : 0.25})`;
+      ctx.lineWidth = Math.max(1, R * 0.02); ctx.stroke();
+    }
+    ctx.restore();
+    const g2 = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 0.5);
+    g2.addColorStop(0, `rgba(${HOT},0.9)`);
+    g2.addColorStop(0.5, `rgba(${MAGENTA},0.5)`);
+    g2.addColorStop(1, `rgba(${BLUE},0.05)`);
+    ctx.fillStyle = g2;
+    ctx.beginPath(); ctx.arc(cx, cy, R * 0.5, 0, Math.PI * 2); ctx.fill();
+    // sweeping lens flare bar
+    ctx.strokeStyle = `rgba(${HOT},0.35)`;
+    ctx.lineWidth = Math.max(1, R * 0.02);
+    ctx.beginPath();
+    ctx.moveTo(cx - R * 2.4, cy + Math.sin(t) * R * 0.5);
+    ctx.lineTo(cx + R * 2.4, cy + Math.sin(t) * R * 0.5);
+    ctx.stroke();
+  }
+
+  function drawGlobe(cx, cy, R, k) {
+    const gr = R * 1.5;
+    arc(cx, cy, gr, 0, Math.PI * 2, Math.max(1, R * 0.02), 0.5);
+    // latitudes as flattened ellipses
+    for (let i = 1; i < 5; i++) {
+      const y = -gr + (i / 5) * gr * 2;
+      const rx = Math.sqrt(Math.max(0, gr * gr - y * y));
+      ctx.beginPath();
+      ctx.ellipse(cx, cy + y, rx, rx * 0.22, 0, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(${BLUE},0.28)`;
+      ctx.lineWidth = Math.max(1, R * 0.012); ctx.stroke();
+    }
+    // longitudes sweeping as the globe turns
+    for (let i = 0; i < 6; i++) {
+      const phase = t * 0.4 + i * (Math.PI / 6);
+      const rx = Math.abs(Math.cos(phase)) * gr;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, rx, gr, 0, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(${BLUE},0.2)`;
+      ctx.lineWidth = Math.max(1, R * 0.01); ctx.stroke();
+    }
+    // pings on the surface
+    for (let i = 0; i < 5; i++) {
+      const a = t * 0.4 + i * 1.25;
+      const px = cx + Math.cos(a) * gr * 0.72;
+      const py = cy + Math.sin(i * 2.1) * gr * 0.55;
+      const pulse = (Math.sin(t * 3 + i) + 1) / 2;
+      ctx.fillStyle = `rgba(255,92,92,${0.5 + pulse * 0.5})`;
+      ctx.beginPath(); ctx.arc(px, py, Math.max(2, R * 0.05), 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = `rgba(255,92,92,${0.5 * (1 - pulse)})`;
+      ctx.lineWidth = Math.max(1, R * 0.015);
+      ctx.beginPath(); ctx.arc(px, py, R * 0.06 + pulse * R * 0.28, 0, Math.PI * 2); ctx.stroke();
+    }
+    arc(cx, cy, gr * 1.22, t * 0.6, t * 0.6 + 2.4, Math.max(1.5, R * 0.045), 0.7, LIME);
+  }
+
+  function drawPanels(cx, cy, R, k) {
+    // crosshatched data blocks, the reference's "loading" panels
+    const pw = R * 4.6, phh = R * 0.62;
+    for (let row = 0; row < 3; row++) {
+      const py = cy + (row - 1) * R * 1.05;
+      const x0 = cx - pw / 2;
+      ctx.strokeStyle = `rgba(${LIME},0.55)`;
+      ctx.lineWidth = Math.max(1, R * 0.018);
+      ctx.strokeRect(x0, py - phh / 2, pw, phh);
+      const cells = 6;
+      for (let i = 0; i < cells; i++) {
+        const cw = pw / cells, cxx = x0 + i * cw;
+        // fill each cell progressively, sweeping left to right
+        const on = clamp((t * 0.8 + row * 0.4) % 3 - i * 0.16, 0, 1);
+        if (on <= 0) continue;
+        ctx.strokeStyle = `rgba(${LIME},${0.22 + on * 0.35})`;
+        ctx.lineWidth = Math.max(1, R * 0.01);
+        ctx.beginPath();
+        ctx.moveTo(cxx, py - phh / 2); ctx.lineTo(cxx + cw, py + phh / 2);
+        ctx.moveTo(cxx + cw, py - phh / 2); ctx.lineTo(cxx, py + phh / 2);
+        ctx.stroke();
+        ctx.strokeStyle = `rgba(${BLUE},0.3)`;
+        ctx.beginPath(); ctx.moveTo(cxx, py - phh / 2); ctx.lineTo(cxx, py + phh / 2); ctx.stroke();
+      }
+    }
+  }
+
   (function frame() {
     t += 0.016;
 
@@ -445,6 +557,45 @@ function getVONode(key, file) {
     g.addColorStop(1, `rgba(${BLUE},0)`);
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, W, H);
+
+    /* ---- mode cycling ----
+       Hold on the ring while KINA speaks so the spectrum keeps tracking her
+       voice; otherwise advance through the modes, each collapsing toward
+       centre before the next builds out. */
+    const speaking = coreEnergy > 0.12 || (activeVO && !activeVO.paused);
+    let kVis = 1;
+    if (b >= 1) {
+      if (speaking) { modeIdx = 0; modeStart = t; }
+      else {
+        const cyc = t - modeStart;
+        if (cyc < MODE_IN) kVis = easeOut(cyc / MODE_IN);
+        else if (cyc < MODE_IN + MODE_HOLD) kVis = 1;
+        else if (cyc < MODE_CYCLE) kVis = 1 - easeOut((cyc - MODE_IN - MODE_HOLD) / MODE_OUT);
+        else {
+          modeIdx = (modeIdx + 1) % MODES.length;
+          modeStart = t; lastSwitch = t; kVis = 0;
+        }
+      }
+    }
+    const mode = MODES[modeIdx];
+    // white flash at the instant of the switch
+    const swFlash = Math.max(0, 1 - (t - lastSwitch) / 0.22);
+    if (swFlash > 0.01) {
+      ctx.fillStyle = `rgba(${HOT},${swFlash * 0.16})`;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // Centrepiece is drawn inside a collapse transform so mode changes read
+    // as the assembly folding away and the next unfolding in its place.
+    ctx.save();
+    ctx.globalAlpha = kVis;
+    const msc = 0.5 + 0.5 * kVis;
+    ctx.translate(cx, cy); ctx.scale(msc, msc); ctx.translate(-cx, -cy);
+
+    if (mode === 'iris') drawIris(cx, cy, R, kVis);
+    else if (mode === 'globe') drawGlobe(cx, cy, R, kVis);
+    else if (mode === 'panels') drawPanels(cx, cy, R, kVis);
+    else {
 
     // ---- radial spectrum annulus (the signature element)
     const BARS = 132;
@@ -599,6 +750,9 @@ function getVONode(key, file) {
       ctx.fillText(String(readout), cx, cy + R * 0.02);
     }
 
+    } // end ring mode
+    ctx.restore();
+
     // ---- corner telemetry, revealed row by row
     const pad = Math.max(8, W * 0.022);
     const fs = Math.max(7, W * 0.0165);
@@ -619,6 +773,12 @@ function getVONode(key, file) {
       ctx.fillStyle = `rgba(${BLUE},0.34)`;
       ctx.fillText(k, W - pad, pad + i * fs * 1.75);
     });
+    // current mode name, so the cycling reads as deliberate
+    if (b >= 1) {
+      ctx.textAlign = 'center';
+      ctx.fillStyle = `rgba(${LIME},${0.5 * kVis})`;
+      ctx.fillText('［ ' + MODE_LABEL[mode] + ' ］', cx, pad);
+    }
 
     // ---- scan modules coming online, bottom-left, one after another
     ctx.textAlign = 'left';
@@ -816,7 +976,6 @@ const VO_LINES = {
   }
 };
 
-let activeVO = null;
 
 function stopVO() {
   if (activeVO) {
