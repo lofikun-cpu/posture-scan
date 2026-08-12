@@ -113,7 +113,12 @@ const check = (n, c, x = '') => {
         !(await page.getAttribute('#kina-loop', 'class') || '').includes('ready'));
 
   await page.click('#btn-begin');
-  await page.waitForTimeout(2500);
+  await page.waitForTimeout(3200);
+  const sfxOk = await page.evaluate(() => {
+    const a = window.__scan.audio();
+    return { ctx: a.ctx, energy: a.energy };
+  });
+  check('audio context unlocked by the tap', sfxOk.ctx === 'running', JSON.stringify(sfxOk));
   const au = await page.evaluate(() => window.__scan.audio());
   console.log('     audio:', JSON.stringify(au));
   check('voiceover audio is driving the core', au.energy > 0.02, JSON.stringify(au));

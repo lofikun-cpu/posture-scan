@@ -107,6 +107,89 @@ function unlockAudio() {
   } catch (e) { audioCtx = null; }
 }
 
+/* ============================================================
+   SFX — synthesized interface sounds.
+
+   Generated with oscillators and filtered noise rather than shipped as
+   files: the page already carries ~18 MB of model and runtime, and a
+   library of UI blips would add more for something a few lines of Web
+   Audio can produce. Every cue is short and quiet by design — a HUD
+   should feel responsive, not chatty.
+
+   Silent until unlockAudio() has run, which happens on the first tap.
+   ============================================================ */
+const SFX_GAIN = 0.5; // master trim for the whole cue set
+
+function sfxReady() { return voiceOn && audioCtx && audioCtx.state === 'running'; }
+
+/** Pitched cue, optionally sweeping between two frequencies. */
+function tone(f0, f1, dur, { type = 'sine', gain = 0.12, delay = 0 } = {}) {
+  if (!sfxReady()) return;
+  const t0 = audioCtx.currentTime + delay;
+  const osc = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(f0, t0);
+  if (f1 && f1 !== f0) osc.frequency.exponentialRampToValueAtTime(Math.max(1, f1), t0 + dur);
+  // short attack, exponential tail — clicks if we ramp straight to zero
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(gain * SFX_GAIN, t0 + Math.min(0.02, dur * 0.2));
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  osc.connect(g); g.connect(audioCtx.destination);
+  osc.start(t0); osc.stop(t0 + dur + 0.02);
+}
+
+/** Filtered noise, for whooshes and sweeps. */
+function noise(dur, fFrom, fTo, gain = 0.08) {
+  if (!sfxReady()) return;
+  const t0 = audioCtx.currentTime;
+  const frames = Math.ceil(audioCtx.sampleRate * dur);
+  const buf = audioCtx.createBuffer(1, frames, audioCtx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < frames; i++) d[i] = Math.random() * 2 - 1;
+  const src = audioCtx.createBufferSource();
+  src.buffer = buf;
+  const bp = audioCtx.createBiquadFilter();
+  bp.type = 'bandpass'; bp.Q.value = 1.2;
+  bp.frequency.setValueAtTime(fFrom, t0);
+  bp.frequency.exponentialRampToValueAtTime(fTo, t0 + dur);
+  const g = audioCtx.createGain();
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(gain * SFX_GAIN, t0 + dur * 0.25);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  src.connect(bp); bp.connect(g); g.connect(audioCtx.destination);
+  src.start(t0); src.stop(t0 + dur);
+}
+
+const SFX = {
+  tap:    () => tone(1250, 1250, 0.04, { type: 'triangle', gain: 0.05 }),
+  blip:   () => tone(2100, 2100, 0.05, { type: 'triangle', gain: 0.06 }),
+  powerUp: () => {
+    tone(170, 880, 0.75, { type: 'sine', gain: 0.11 });
+    tone(340, 1760, 0.75, { type: 'sine', gain: 0.04 });   // octave shimmer
+    noise(0.8, 240, 3200, 0.05);
+  },
+  whoosh: () => noise(0.42, 320, 2600, 0.055),
+  lock:   () => { tone(720, 720, 0.07, { type: 'sine', gain: 0.09 });
+                  tone(1080, 1080, 0.09, { type: 'sine', gain: 0.09, delay: 0.075 }); },
+  reject: () => { tone(420, 200, 0.34, { type: 'sawtooth', gain: 0.06 });
+                  noise(0.25, 900, 260, 0.035); },
+  scan:   () => { tone(560, 1400, 0.5, { type: 'sine', gain: 0.05 });
+                  noise(0.5, 600, 2400, 0.035); },
+  reveal: () => {                                          // rising arpeggio
+    [523, 659, 784, 1046].forEach((f, i) =>
+      tone(f, f, 0.28, { type: 'sine', gain: 0.085, delay: i * 0.085 }));
+    noise(0.7, 700, 4200, 0.04);
+  }
+};
+
+/** Play a cue and give the core a matching visual kick. */
+function sfx(name, kick = 0.5) {
+  if (!SFX[name]) return;
+  SFX[name]();
+  if (sfxReady()) coreEnergy = Math.max(coreEnergy, kick);
+}
+
 /* Route a voiceover element through an analyser so the spectrum ring follows
    the real waveform. Only ever done on a RUNNING context: createMediaElement-
    Source detaches the element from the default output, so wiring it up while
@@ -488,9 +571,19 @@ function say(text) {
 
 $('mute-btn').addEventListener('click', () => {
   voiceOn = !voiceOn;
-  $('mute-btn').textContent = voiceOn ? 'VOICE: ON' : 'VOICE: OFF';
-  if (!voiceOn && 'speechSynthesis' in window) speechSynthesis.cancel();
+  $('mute-btn').textContent = voiceOn ? 'SOUND: ON' : 'SOUND: OFF';
+  if (voiceOn) { unlockAudio(); sfx('tap'); }
+  else {
+    if ('speechSynthesis' in window) speechSynthesis.cancel();
+    if (activeVO) { try { activeVO.pause(); } catch (e) {} }
+  }
 });
+
+// Every button gets a tap cue, without wiring each one individually.
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest && e.target.closest('.btn');
+  if (btn && btn.id !== 'btn-begin') sfx('tap', 0.25);
+}, true);
 
 /* ============================================================
    VOICEOVER — pre-recorded ElevenLabs audio when the file exists,
@@ -909,6 +1002,8 @@ async function runBriefing() {
   if (briefingRan) return;
   briefingRan = true;
   unlockAudio(); // must happen inside the tap, before anything async
+  sfx('powerUp', 0.9);
+  await sleep(650); // let the power-up land before KINA speaks over it
   $('btn-begin').classList.add('hidden');
   $('sound-hint').classList.add('hidden');
   $('btn-skip-vo').classList.remove('hidden');
@@ -936,6 +1031,7 @@ $('btn-skip-vo').addEventListener('click', endBriefing);
 $('btn-start').addEventListener('click', () => {
   unlockAudio(); // covers users who skip the briefing entirely
   stopVO();
+  sfx('whoosh', 0.6);
   getLandmarker().catch(() => {});
   state.want = 'front';
   renderCaptureUI();
@@ -1018,6 +1114,7 @@ async function ingest(img) {
   $('metrics').innerHTML = '';
   const view = state.want;
   $('scan-status').textContent = 'ACQUIRING…';
+  sfx('scan', 0.6);
   say(view === 'front' ? 'Frontal image acquired. Analysing.' : 'Sagittal image acquired. Analysing.');
 
   const canvas = $('scan-canvas');
@@ -1054,6 +1151,7 @@ async function ingest(img) {
   });
 
   const reject = (msg) => {
+    sfx('reject', 0.4);
     showPanel('panel-capture'); renderCaptureUI(); showError(msg);
     say('Scan rejected. ' + msg);
   };
@@ -1083,6 +1181,7 @@ async function ingest(img) {
   releaseMasks(det);
 
   drawScene(ctx, img, W, H, lms, 1);
+  sfx('lock', 0.7); // view accepted
   state[view] = { img, lms, world, contour, W, H };
   setThumb(view, canvas.toDataURL('image/jpeg', 0.6));
 
@@ -1138,6 +1237,7 @@ async function runFullAnalysis() {
       box.appendChild(row);
       await sleep(80);
       row.classList.add('show');
+      sfx('blip', 0.35); // one tick per checkpoint locking in
       await sleep(260);
     }
   }
@@ -1163,6 +1263,7 @@ function metricRow(m) {
 /* ---------- score panel ---------- */
 function revealScore(result) {
   showPanel('panel-score');
+  sfx('reveal', 1);
   const v = verdictFor(result.score);
   $('verdict').textContent = v.title;
   $('verdict-sub').textContent = v.sub;
