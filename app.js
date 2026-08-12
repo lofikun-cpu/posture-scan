@@ -87,6 +87,12 @@ function showPanel(id) {
    file exists, so the screen never looks empty before the custom
    loop is dropped in.
    ============================================================ */
+/* Declared here rather than beside the loader below: the core's render loop
+   starts during module evaluation and reads them, so `let` further down would
+   be in the temporal dead zone on the first frames. */
+let modelProgress = 0;    // 0–1 while the pose model downloads
+let modelLoading = false;
+
 let coreEnergy = 0;       // 0 idle, 1 speaking — drives glow and bar height
 let coreAnalyser = null;  // live FFT of the voiceover, when Web Audio is available
 let audioCtx = null;
@@ -561,6 +567,51 @@ function getVONode(key, file) {
       ctx.fillText('▸ ' + m.label + '  ONLINE', pad, y);
     });
 
+    // ---- ambient detail: scattered crosshair marks (reference has these
+    //      sprinkled across the panels as texture)
+    const ambIn = ph(b, 0.75, 1.0);
+    if (ambIn > 0.001) {
+      ctx.strokeStyle = `rgba(${BLUE},${0.22 * ambIn})`;
+      ctx.lineWidth = Math.max(1, W * 0.0018);
+      const marks = [[0.14, 0.34], [0.11, 0.68], [0.86, 0.4], [0.9, 0.72], [0.3, 0.14], [0.72, 0.87]];
+      const ms = Math.max(3, W * 0.009);
+      marks.forEach(([mx, my], i) => {
+        const x = mx * W, y = my * H;
+        const tw = ms * (0.7 + 0.3 * Math.sin(t * 2 + i));
+        ctx.beginPath();
+        ctx.moveTo(x - tw, y); ctx.lineTo(x + tw, y);
+        ctx.moveTo(x, y - tw); ctx.lineTo(x, y + tw);
+        ctx.stroke();
+      });
+    }
+
+    // ---- model download meter, mirroring the reference's "loading… 100%"
+    if (modelLoading && modelProgress < 1) {
+      const pct = Math.round(modelProgress * 100);
+      const barW = W * 0.34, barH = Math.max(3, H * 0.012);
+      const bx = cx - barW / 2, by = H * 0.845;
+      // dark plate so the readout stays legible over the spectrum ring
+      const plW = barW * 1.35, plH = fs * 4.2;
+      ctx.fillStyle = 'rgba(3,7,13,0.82)';
+      ctx.fillRect(cx - plW / 2, by - plH + barH * 2, plW, plH);
+      ctx.strokeStyle = `rgba(${BLUE},0.25)`;
+      ctx.lineWidth = Math.max(1, W * 0.0015);
+      ctx.strokeRect(cx - plW / 2, by - plH + barH * 2, plW, plH);
+      ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      ctx.font = `600 ${fs * 1.6}px "Consolas", monospace`;
+      ctx.fillStyle = `rgba(${HOT},0.95)`;
+      ctx.fillText(pct + '%', cx, by - fs * 1.5);
+      ctx.font = `${fs}px "Consolas", monospace`;
+      ctx.fillStyle = `rgba(${BLUE},0.6)`;
+      ctx.fillText('loading ai core…', cx, by - fs * 0.3);
+      ctx.strokeStyle = `rgba(${BLUE},0.45)`;
+      ctx.lineWidth = Math.max(1, W * 0.002);
+      ctx.strokeRect(bx, by, barW, barH);
+      ctx.fillStyle = `rgba(${LIME},0.75)`;
+      ctx.fillRect(bx + 1, by + 1, Math.max(0, (barW - 2) * modelProgress), barH - 2);
+      ctx.textBaseline = 'top';
+    }
+
     // ---- running status callout, mid-right, cycling with a flash on change
     if (b > 0.8) {
       if (t - calloutAt > 2.2) { calloutAt = t; calloutIdx = (calloutIdx + 1) % CALLOUTS.length; }
@@ -865,25 +916,53 @@ async function typeLines(el, lines, speed = 14) {
   }
 }
 
-/* ---------- MediaPipe lazy loader ---------- */
+/* ---------- MediaPipe lazy loader ----------
+   The model is fetched by hand rather than by URL so its download can be
+   metered: it's ~9 MB, the slowest step on a phone, and a real percentage
+   is the difference between "loading" and "stuck". */
+
+async function fetchWithProgress(url, onProgress) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('model fetch failed: ' + res.status);
+  const total = Number(res.headers.get('content-length')) || 0;
+  if (!res.body || !total) return new Uint8Array(await res.arrayBuffer());
+  const reader = res.body.getReader();
+  const chunks = [];
+  let received = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    received += value.length;
+    onProgress(received / total);
+  }
+  const buf = new Uint8Array(received);
+  let off = 0;
+  for (const chunk of chunks) { buf.set(chunk, off); off += chunk.length; }
+  return buf;
+}
+
 let landmarkerPromise = null;
 function getLandmarker() {
   if (!landmarkerPromise) {
     landmarkerPromise = (async () => {
+      modelLoading = true;
       const vision = await import('./vendor/mediapipe/vision_bundle.mjs');
       const files = await vision.FilesetResolver.forVisionTasks('./vendor/mediapipe/wasm');
-      return vision.PoseLandmarker.createFromOptions(files, {
-        baseOptions: {
-          modelAssetPath: './vendor/models/pose_landmarker_full.task',
-          delegate: 'GPU'
-        },
+      const modelAssetBuffer = await fetchWithProgress(
+        './vendor/models/pose_landmarker_full.task', (p) => { modelProgress = p; });
+      modelProgress = 1;
+      const lm = await vision.PoseLandmarker.createFromOptions(files, {
+        baseOptions: { modelAssetBuffer, delegate: 'GPU' },
         runningMode: 'IMAGE',
         numPoses: 1,
         outputSegmentationMasks: true,
         minPoseDetectionConfidence: 0.5,
         minPosePresenceConfidence: 0.5
       });
-    })().catch(err => { landmarkerPromise = null; throw err; });
+      modelLoading = false;
+      return lm;
+    })().catch(err => { landmarkerPromise = null; modelLoading = false; throw err; });
   }
   return landmarkerPromise;
 }
