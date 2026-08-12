@@ -110,6 +110,7 @@ function unlockAudio() {
     if (navigator.audioSession) {
       try { navigator.audioSession.type = 'playback'; } catch (e) {}
     }
+    startBed(); // the drone runs from the first tap onward
   } catch (e) { audioCtx = null; }
 }
 
@@ -167,25 +168,90 @@ function noise(dur, fFrom, fTo, gain = 0.08) {
   src.start(t0); src.stop(t0 + dur);
 }
 
+/* ---- ambient bed ----
+   Measuring the reference audio settled the character: zero near-silent
+   frames, spectral centroid 440–690 Hz, and 50–70% of all energy below
+   300 Hz, with well under one transient per second. So it is a deep
+   continuous drone with rare events — not a stream of bright blips. The
+   bed below carries that weight; the cues sit low on top of it. */
+let bed = null;
+
+function startBed() {
+  if (bed || !sfxReady()) return;
+  const t0 = audioCtx.currentTime;
+  const out = audioCtx.createGain();
+  out.gain.setValueAtTime(0.0001, t0);
+  out.gain.exponentialRampToValueAtTime(0.055 * SFX_GAIN, t0 + 2.5); // fades in
+  out.connect(audioCtx.destination);
+
+  // stacked low partials, slightly detuned so they beat against each other
+  const oscs = [[55, 'sine', 1], [82.4, 'sine', 0.55], [110, 'triangle', 0.28]]
+    .map(([f, type, lvl]) => {
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.type = type; o.frequency.value = f; g.gain.value = lvl;
+      o.connect(g); g.connect(out); o.start(t0);
+      return o;
+    });
+
+  // low-passed noise for air under the tone
+  const frames = audioCtx.sampleRate * 2;
+  const nb = audioCtx.createBuffer(1, frames, audioCtx.sampleRate);
+  const d = nb.getChannelData(0);
+  for (let i = 0; i < frames; i++) d[i] = Math.random() * 2 - 1;
+  const nsrc = audioCtx.createBufferSource();
+  nsrc.buffer = nb; nsrc.loop = true;
+  const lp = audioCtx.createBiquadFilter();
+  lp.type = 'lowpass'; lp.frequency.value = 260; lp.Q.value = 0.7;
+  const ng = audioCtx.createGain(); ng.gain.value = 0.5;
+  nsrc.connect(lp); lp.connect(ng); ng.connect(out);
+  nsrc.start(t0);
+
+  // very slow swell so it breathes rather than sitting flat
+  const lfo = audioCtx.createOscillator();
+  const lfoAmt = audioCtx.createGain();
+  lfo.frequency.value = 0.07; lfoAmt.gain.value = 0.018 * SFX_GAIN;
+  lfo.connect(lfoAmt); lfoAmt.connect(out.gain); lfo.start(t0);
+
+  bed = { out, oscs, nsrc, lfo };
+}
+
+function stopBed() {
+  if (!bed) return;
+  const t0 = audioCtx.currentTime;
+  try {
+    bed.out.gain.cancelScheduledValues(t0);
+    bed.out.gain.setValueAtTime(Math.max(0.0001, bed.out.gain.value), t0);
+    bed.out.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.4);
+    bed.oscs.forEach(o => o.stop(t0 + 0.5));
+    bed.nsrc.stop(t0 + 0.5);
+    bed.lfo.stop(t0 + 0.5);
+  } catch (e) {}
+  bed = null;
+}
+
+/* Cues pitched an octave-plus below the first pass, to sit in the same
+   register as the reference rather than chiming over it. */
 const SFX = {
-  tap:    () => tone(1250, 1250, 0.04, { type: 'triangle', gain: 0.05 }),
-  blip:   () => tone(2100, 2100, 0.05, { type: 'triangle', gain: 0.06 }),
+  tap:    () => tone(330, 330, 0.05, { type: 'sine', gain: 0.05 }),
+  blip:   () => tone(560, 560, 0.06, { type: 'sine', gain: 0.045 }),
   powerUp: () => {
-    tone(170, 880, 0.75, { type: 'sine', gain: 0.11 });
-    tone(340, 1760, 0.75, { type: 'sine', gain: 0.04 });   // octave shimmer
-    noise(0.8, 240, 3200, 0.05);
+    tone(40, 190, 1.1, { type: 'sine', gain: 0.22 });        // sub sweep
+    tone(80, 380, 1.1, { type: 'sine', gain: 0.10 });
+    noise(1.0, 90, 700, 0.07);
   },
-  whoosh: () => noise(0.42, 320, 2600, 0.055),
-  lock:   () => { tone(720, 720, 0.07, { type: 'sine', gain: 0.09 });
-                  tone(1080, 1080, 0.09, { type: 'sine', gain: 0.09, delay: 0.075 }); },
-  reject: () => { tone(420, 200, 0.34, { type: 'sawtooth', gain: 0.06 });
-                  noise(0.25, 900, 260, 0.035); },
-  scan:   () => { tone(560, 1400, 0.5, { type: 'sine', gain: 0.05 });
-                  noise(0.5, 600, 2400, 0.035); },
-  reveal: () => {                                          // rising arpeggio
-    [523, 659, 784, 1046].forEach((f, i) =>
-      tone(f, f, 0.28, { type: 'sine', gain: 0.085, delay: i * 0.085 }));
-    noise(0.7, 700, 4200, 0.04);
+  whoosh: () => { noise(0.55, 700, 90, 0.09); tone(150, 70, 0.5, { type: 'sine', gain: 0.09 }); },
+  lock:   () => { tone(180, 180, 0.09, { type: 'sine', gain: 0.13 });
+                  tone(270, 270, 0.12, { type: 'sine', gain: 0.10, delay: 0.08 }); },
+  reject: () => { tone(150, 62, 0.5, { type: 'sine', gain: 0.16 });
+                  noise(0.35, 320, 80, 0.06); },
+  scan:   () => { tone(90, 240, 0.7, { type: 'sine', gain: 0.10 });
+                  noise(0.7, 160, 900, 0.05); },
+  reveal: () => {                                            // low rising figure
+    [131, 165, 196, 262].forEach((f, i) =>
+      tone(f, f, 0.42, { type: 'sine', gain: 0.13, delay: i * 0.1 }));
+    tone(65, 98, 0.9, { type: 'sine', gain: 0.14 });          // sub underneath
+    noise(0.9, 120, 800, 0.05);
   }
 };
 
@@ -696,6 +762,7 @@ $('mute-btn').addEventListener('click', () => {
   $('mute-btn').textContent = voiceOn ? 'SOUND: ON' : 'SOUND: OFF';
   if (voiceOn) { unlockAudio(); sfx('tap'); }
   else {
+    stopBed();
     if ('speechSynthesis' in window) speechSynthesis.cancel();
     if (activeVO) { try { activeVO.pause(); } catch (e) {} }
   }
