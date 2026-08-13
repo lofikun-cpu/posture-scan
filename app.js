@@ -378,6 +378,11 @@ function sfx(name, kick = 0.5) {
 function wireAnalyser(node) {
   if (node.analyser || node.wired) return;
   if (!audioCtx || audioCtx.state !== 'running') return; // leave it on the speaker
+  // iOS: createMediaElementSource on a media element is long-standing broken in
+  // WebKit and commonly yields silence. The voiceover is the one thing that
+  // reliably plays there, so it is never routed through Web Audio — the core
+  // falls back to an envelope instead of a true spectrum.
+  if (IS_IOS) { node.wired = true; return; }
   node.wired = true;
   try {
     const src = audioCtx.createMediaElementSource(node.el);
@@ -653,6 +658,16 @@ function getVONode(key, file) {
       let sum = 0;
       for (let i = 0; i < spec.length; i++) sum += spec[i];
       coreEnergy = Math.max(coreEnergy, Math.min(1, (sum / spec.length) / 96));
+    } else if (activeVO && !activeVO.paused && !activeVO.ended) {
+      // No analyser available (iOS). Drive the core from a speech-shaped
+      // envelope so it still reacts while KINA talks — layered rates plus
+      // occasional dips read as phrasing rather than a steady throb.
+      // Multiplied rather than summed: summing absolute sines almost never
+      // dips, which pins the value at its ceiling instead of animating.
+      const syllable = Math.sin(t * 5.9) * 0.5 + 0.5;    // fast, syllabic
+      const phrase = Math.sin(t * 1.6) * 0.38 + 0.62;    // slower, phrasing
+      const gap = Math.sin(t * 0.9) > 0.88 ? 0.2 : 1;    // occasional breath
+      coreEnergy = Math.max(coreEnergy, (0.12 + syllable * phrase * 0.85) * gap);
     }
 
     const W = c.width, H = c.height;
@@ -1222,7 +1237,9 @@ function playVO(key) {
       if (cancelled) return;
       const elapsed = audioLive && audio ? audio.currentTime * 1000 : performance.now() - t0;
       const pos = Math.min(1, elapsed / durationMs);
-      coreEnergy = Math.max(coreEnergy, 0.85);
+      // Floor only — keeps the core alive between words. Pinning it high here
+      // overrode both the analyser and the iOS envelope, so nothing reacted.
+      coreEnergy = Math.max(coreEnergy, 0.22);
       let acc = 0;
       for (let i = 0; i < weights.length; i++) {
         acc += weights[i] / total;
@@ -1245,7 +1262,7 @@ function speakLines(lines, onChunk) {
   return new Promise((resolve) => {
     let i = 0;
     // keep the core pulsing while synthesis runs — it emits no timeupdate
-    const tick = setInterval(() => { coreEnergy = Math.max(coreEnergy, 0.8); }, 120);
+    const tick = setInterval(() => { coreEnergy = Math.max(coreEnergy, 0.35); }, 120);
     const done = () => { clearInterval(tick); resolve(); };
     const next = () => {
       if (i >= lines.length) return done();
