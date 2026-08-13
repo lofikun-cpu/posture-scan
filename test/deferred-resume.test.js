@@ -1,15 +1,24 @@
-/* Reproduce the iOS case: force the context to start suspended so resume()
-   resolves after the tap, and confirm cues are held then released. */
+/* Deferred resume() on the live Web Audio path.
+
+   AudioContext.resume() is asynchronous, so a cue fired in the same tick as
+   the tap finds the context still suspended and used to be dropped — silence
+   where the interface should have answered. Cues raised too early are queued
+   and released once the context is running; this forces that window open.
+
+   iOS is deliberately NOT the subject any more: it creates no AudioContext at
+   all and plays rendered files instead (see ios-output.test.js). This covers
+   everywhere the live graph does run — desktop and Android — where an
+   autoplay policy can hold the context suspended past the gesture. */
 const { chromium } = require('playwright-core');
 (async () => {
   const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium',
     args: ['--use-gl=swiftshader','--enable-unsafe-swiftshader'] });  // no autoplay flag
   const p = await b.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2,
-    userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+    userAgent: 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Mobile Safari/537.36',
     isMobile: true, hasTouch: true });
   p.on('pageerror', e => console.log('PAGEERROR:', e.message));
-  // delay resume() resolution to mimic iOS
-  // Report 'suspended' until resume() resolves, exactly as iOS behaves.
+  // Report 'suspended' until resume() actually resolves, which is the window
+  // the queue exists to cover.
   await p.addInitScript(() => {
     const OrigAC = window.AudioContext || window.webkitAudioContext;
     window.AudioContext = function () {

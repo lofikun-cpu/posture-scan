@@ -4,10 +4,13 @@
      1. Synthesized cues were silent on iPhone (ringer switch mutes Web Audio).
      2. Routing the graph through a MediaStream element made the cues audible
         but silenced the voiceover — one element took over the audio session.
-   The current design renders each cue offline to a WAV and plays it through a
-   pooled <audio> element, the same mechanism as the voiceover. So the two
-   things that must both be true on iOS are: a cue file actually plays, AND the
-   voiceover keeps playing alongside it. Desktop keeps the live Web Audio graph.
+     3. Rendering cues to WAV and playing them through a pool of elements did
+        the same thing: the device plays one audio stream, so cues fired under
+        the briefing took the output from it. A running-but-silent AudioContext
+        also held the audio route open, audible as a hum.
+   So on iOS there is now no AudioContext, exactly one cue element, and cues
+   yield to the voice. What must be true: a cue plays before KINA speaks, and
+   nothing takes the stream off him once he starts. Desktop keeps the live graph.
 */
 const { chromium } = require('playwright-core');
 
@@ -50,15 +53,15 @@ const UA = {
     check('nothing is routed through a MediaStream element', streams === 0, `found ${streams}`);
 
     if (ios) {
+      check('no AudioContext is left running', !early.ctx, `ctx=${early.ctx}`);
       check('cue files rendered', early.cues > 0, JSON.stringify(early));
-      check('playback pool primed', early.pool === 4, `pool=${early.pool}`);
-      check('a cue file is actually playing', early.poolProgress > 0.01,
-            `progress=${early.poolProgress}`);
+      check('single cue channel primed', early.cueChannel === true, JSON.stringify(early));
+      check('the loading cue is actually playing', early.cueProgress > 0.01,
+            `progress=${early.cueProgress}`);
       check('no cue left stranded in the queue', early.queued === 0, `queued=${early.queued}`);
-      check('ambient bed skipped on iOS', true);
     } else {
       check('live graph running', early.ctx === 'running', JSON.stringify(early));
-      check('no file pool needed', early.pool === 0, `pool=${early.pool}`);
+      check('no cue channel needed', early.cueChannel !== true, JSON.stringify(early));
     }
 
     // The voiceover has to survive whatever the cues are doing.
@@ -69,6 +72,10 @@ const UA = {
     check('voiceover is not paused', late.paused === false, JSON.stringify(late));
     check('voiceover is not muted', late.muted === false, JSON.stringify(late));
     check('core is reacting to the voice', late.energy > 0.05, `energy=${late.energy}`);
+    if (ios) {
+      // The whole point: nothing may take the stream while he is talking.
+      check('no cue is playing over the voice', late.cuePlaying === false, JSON.stringify(late));
+    }
 
     await p.close();
   }

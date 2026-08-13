@@ -120,26 +120,22 @@ function unlockAudio() {
     if (navigator.audioSession) {
       try { navigator.audioSession.type = 'playback'; } catch (e) {}
     }
+    // iOS gets no AudioContext at all. It needs none — the analyser, the
+    // ambient bed and the live cue graph are all skipped there — and a running
+    // context holds the audio route open, which is audible on the device as a
+    // faint idle hum. Its cues are rendered offline instead, which needs no
+    // live context. Both halves of the file path have to start inside the
+    // gesture: the element can only be unlocked by a user interaction, and the
+    // render is kicked off here so the first cue is ready moments later.
+    if (IS_IOS) {
+      primeCueChannel();
+      renderAllCues();
+      return;
+    }
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
     audioCtx = audioCtx || new AC();
     if (audioCtx.state === 'suspended') audioCtx.resume();
-    // Older iOS ignores audioSession. Starting a silent buffer inside the
-    // gesture is the long-standing way to get its output running at all.
-    if (IS_IOS) {
-      const b = audioCtx.createBuffer(1, 1, 22050);
-      const s = audioCtx.createBufferSource();
-      s.buffer = b; s.connect(audioCtx.destination); s.start(0);
-    }
-    // iOS never hears the live graph with the ringer switch on, so its cues
-    // are files instead. Both halves of that have to start inside the gesture:
-    // the pool can only be unlocked by a user interaction, and the render is
-    // kicked off here so the first cue is ready almost immediately after.
-    if (IS_IOS) {
-      primeCuePool();
-      renderAllCues();
-      return;
-    }
     // Only start the bed and release queued cues once the context is really
     // running — resume() resolves after the gesture on iOS.
     let released = false;
@@ -246,9 +242,6 @@ const CUE_SECONDS = {
   scan: 1.0, reveal: 1.4, systemLoading: 3.8, telemetry: 0.2, swoosh: 0.45,
   target: 0.4, staticZap: 0.6
 };
-/* Rendered first, because they fire soonest after the tap. */
-const CUE_PRIORITY = ['systemLoading', 'tap', 'powerUp', 'whoosh', 'lock', 'blip'];
-
 const cueURL = {};          // name → object URL of the rendered WAV
 let cuesRendering = false;
 
@@ -282,45 +275,63 @@ function renderCue(name) {
   });
 }
 
-/** Render every cue, releasing queued ones as they become playable. */
+/** Render the cues iOS is allowed to play, releasing any held as they land.
+    systemLoading goes first — it fires within a beat of the tap. */
 async function renderAllCues() {
   if (cuesRendering) return;
   cuesRendering = true;
-  const rest = Object.keys(SFX).filter(n => !CUE_PRIORITY.includes(n));
-  for (const name of CUE_PRIORITY.concat(rest)) {
+  const names = ['systemLoading', ...[...IOS_CUES].filter(n => n !== 'systemLoading')];
+  for (const name of names) {
     await renderCue(name);
     if (pendingSfx.length) flushSfx();
   }
 }
 
-/* Pool of elements, unlocked inside the tap with a moment of silence so they
-   can be re-pointed at a cue later without another gesture. Four is enough for
-   the cues that overlap; a fifth simply steals the oldest. */
-const cuePool = [];
-let cueSlot = 0;
-function primeCuePool() {
-  if (cuePool.length) return;
-  let url;
-  try { url = silentWavURL(); } catch (e) { return; }
-  for (let i = 0; i < 4; i++) {
-    const el = new Audio();
-    el.preload = 'auto';
-    el.src = url;
-    const p = el.play();
+/* ---- one cue at a time, and never over KINA ----
+   This device plays a single audio stream. Starting a second element does not
+   mix — it takes the output, which is what silenced the voiceover when four
+   pooled elements were firing cues underneath it. So iOS gets exactly one cue
+   element, and it yields to the voice: a cue that would land while KINA is
+   speaking is dropped, and its visual kick plays alone.
+
+   The consequence, deliberately accepted: the small interface blips are silent
+   on iOS. They are decoration, the voice is the product, and there is no way
+   to have both on one stream. */
+const IOS_CUES = new Set(['systemLoading', 'lock', 'reject', 'reveal']);
+let cueEl = null;
+
+function primeCueChannel() {
+  if (cueEl) return;
+  try {
+    cueEl = new Audio();
+    cueEl.preload = 'auto';
+    cueEl.src = silentWavURL();   // unlocks the element inside the gesture
+    const p = cueEl.play();
     if (p && p.catch) p.catch(() => {});
-    cuePool.push(el);
-  }
+  } catch (e) { cueEl = null; }
+}
+
+/** True while anything else is using the single audio stream. */
+function voiceBusy() {
+  if (activeVO && !activeVO.paused && !activeVO.ended) return true;
+  try { if (window.speechSynthesis && speechSynthesis.speaking) return true; } catch (e) {}
+  return false;
 }
 
 function playCueFile(url) {
-  if (!cuePool.length) return;
-  const el = cuePool[cueSlot++ % cuePool.length];
+  if (!cueEl || voiceBusy()) return;
   try {
-    if (el.src !== url) el.src = url;
-    el.currentTime = 0;
-    const p = el.play();
+    if (cueEl.src !== url) cueEl.src = url;
+    cueEl.currentTime = 0;
+    const p = cueEl.play();
     if (p && p.catch) p.catch(() => {});
   } catch (e) {}
+}
+
+/** Clear the stream before the voiceover claims it. */
+function stopCueFile() {
+  if (!cueEl) return;
+  try { cueEl.pause(); cueEl.currentTime = 0; } catch (e) {}
 }
 
 /** Pitched cue, optionally sweeping between two frequencies. */
@@ -484,13 +495,15 @@ const SFX = {
 function sfx(name, kick = 0.5) {
   if (!SFX[name] || !voiceOn) return;
   if (IS_IOS) {
+    // The visual kick always happens — only the sound is rationed.
+    coreEnergy = Math.max(coreEnergy, kick);
+    if (!IOS_CUES.has(name)) return;
     // Still rendering: hold it rather than lose it.
     if (!cueURL[name]) {
       if (pendingSfx.length < 12) pendingSfx.push([name, kick]);
       return;
     }
     playCueFile(cueURL[name]);
-    coreEnergy = Math.max(coreEnergy, kick);
     return;
   }
   // Context not up yet: hold the cue rather than lose it.
@@ -1349,12 +1362,13 @@ function playVO(key) {
       }, { once: true });
       setTimeout(() => {
         if (!audioLive && !cancelled) {
-          $('kina-status').textContent = '◈ NO AUDIO — CHECK RINGER / TAP SKIP';
+          $('kina-status').textContent = '◈ NO AUDIO — CHECK VOLUME / TAP SKIP';
         }
       }, 2500);
       audio.addEventListener('playing', onPlaying, { once: true });
       audio.addEventListener('error', useSpeech, { once: true });
       try { audio.currentTime = 0; } catch (e) {}
+      stopCueFile();      // one stream: the voice takes it back
       audio.play().catch(useSpeech);
       // Generous last resort: the file is preloaded, so this should never fire
       // on a working connection. Short timers here used to kill a slow-loading
@@ -1391,6 +1405,7 @@ let voCancel = null;
 /** Speech-synthesis reading of the same script, chunk by chunk. */
 function speakLines(lines, onChunk) {
   if (!voiceOn || !('speechSynthesis' in window)) return Promise.resolve();
+  stopCueFile();        // one stream: the voice takes it back
   return new Promise((resolve) => {
     let i = 0;
     // keep the core pulsing while synthesis runs — it emits no timeupdate
@@ -2162,9 +2177,9 @@ if (['localhost', '127.0.0.1'].includes(location.hostname)) {
       ctx: audioCtx && audioCtx.state,
       queued: pendingSfx.length,
       cues: Object.keys(cueURL).length,
-      pool: cuePool.length,
-      poolPlaying: cuePool.filter(e => !e.paused).length,
-      poolProgress: Math.max(0, ...cuePool.map(e => e.currentTime || 0)),
+      cueChannel: !!cueEl,
+      cueProgress: cueEl ? cueEl.currentTime : 0,
+      cuePlaying: cueEl ? !cueEl.paused : false,
       t: activeVO ? activeVO.currentTime : null,
       paused: activeVO ? activeVO.paused : null,
       muted: activeVO ? (activeVO.muted || activeVO.volume === 0) : null
