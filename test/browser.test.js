@@ -3,9 +3,20 @@
    the two-photo UI flow, the mesh warp, and share-card generation. */
 const { chromium } = require('playwright-core');
 
-let pass = 0, fail = 0;
+let pass = 0, fail = 0, skipped = 0;
 const check = (n, c, x = '') => {
   if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n} ${x}`); }
+};
+
+/* Everything downstream of detection needs a real photograph of a person —
+   MediaPipe finds nothing in a synthetic image, and the only photo to hand is
+   personal, so it is not committed. Drop any full-body shot at the repo root
+   as person.jpg to run those sections; without it they are skipped rather than
+   failed, so the suite still covers load, intro, audio and the share card. */
+const FIXTURE = '/person.jpg';
+const skip = (section) => {
+  skipped++;
+  console.log(`  … ${section} skipped — no person.jpg at the repo root`);
 };
 
 (async () => {
@@ -16,7 +27,11 @@ const check = (n, c, x = '') => {
   });
   const page = await browser.newPage({ viewport: { width: 420, height: 900 } });
   const errors = [];
-  page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+  // Location included so a 404 can be attributed — the fixture probe below
+  // deliberately requests a file that may not exist.
+  page.on('console', m => {
+    if (m.type() === 'error') errors.push(`${m.text()} @ ${(m.location() || {}).url || '?'}`);
+  });
   page.on('pageerror', e => errors.push('PAGEERROR: ' + e.message));
 
   console.log('\n── Page load');
@@ -37,6 +52,14 @@ const check = (n, c, x = '') => {
   }));
   check('body flagged as intro', await page.evaluate(() => document.body.classList.contains('intro')));
 
+  const hasFixture = await page.evaluate(async (src) => {
+    try { const r = await fetch(src, { method: 'HEAD' }); return r.ok; } catch (e) { return false; }
+  }, FIXTURE);
+
+  if (!hasFixture) {
+    console.log('\n── MediaPipe integration');
+    skip('detection, contour, quality gate, full flow, warp and CTA');
+  } else {
   console.log('\n── MediaPipe integration (real model, real image)');
   const det = await page.evaluate(async () => {
     const lm = await window.__scan.getLandmarker();
@@ -109,6 +132,7 @@ const check = (n, c, x = '') => {
   check('gate reaches a decision for side', typeof gate.asSide.ok === 'boolean', JSON.stringify(gate.asSide));
   check('front and side verdicts are mutually exclusive',
         gate.asFront.ok !== gate.asSide.ok, JSON.stringify(gate));
+  }
 
   console.log('\n── Intro briefing');
   const core = await page.evaluate(() => {
@@ -166,6 +190,7 @@ const check = (n, c, x = '') => {
   check('skip hides the caption', !(await page.getAttribute('#vo-caption', 'class') || '').includes('on'));
   check('skip reveals start button', !(await page.getAttribute('#btn-start', 'class') || '').includes('hidden'));
 
+  if (hasFixture) {
   console.log('\n── Two-photo UI flow (seam-driven)');
   await page.click('#btn-start');
   await page.waitForSelector('#panel-capture.active', { timeout: 5000 });
@@ -244,6 +269,19 @@ const check = (n, c, x = '') => {
   });
   check('slider drives the clip path', /20%/.test(slider), slider);
 
+  console.log('\n── CTA deep link');
+  const cta = await page.getAttribute('#btn-kinapt', 'href');
+  console.log(`     ${cta}`);
+  check('CTA points at the App Store', /apps\.apple\.com/.test(cta), cta);
+  check('CTA carries scan attribution', /ct=posture-scan/.test(cta) && /score=/.test(cta), cta);
+
+  console.log('\n── Rescan resets state');
+  await page.click('#btn-retry');
+  await page.waitForSelector('#panel-capture.active', { timeout: 5000 });
+  check('front thumb reset', (await page.textContent('#thumb-front')).includes('PENDING'));
+  check('back to front step', (await page.getAttribute('#dot-front', 'class')).includes('current'));
+  }
+
   console.log('\n── Share card');
   const card = await page.evaluate(() => {
     const c = window.__scan.buildShareCard({
@@ -259,22 +297,11 @@ const check = (n, c, x = '') => {
   check('share card is 1080x1350 (portrait social)', card.w === 1080 && card.h === 1350, JSON.stringify(card));
   check('share card has rendered content', card.litFrac > 0.02, JSON.stringify(card));
 
-  console.log('\n── CTA deep link');
-  const cta = await page.getAttribute('#btn-kinapt', 'href');
-  console.log(`     ${cta}`);
-  check('CTA points at the App Store', /apps\.apple\.com/.test(cta), cta);
-  check('CTA carries scan attribution', /ct=posture-scan/.test(cta) && /score=/.test(cta), cta);
-
-  console.log('\n── Rescan resets state');
-  await page.click('#btn-retry');
-  await page.waitForSelector('#panel-capture.active', { timeout: 5000 });
-  check('front thumb reset', (await page.textContent('#thumb-front')).includes('PENDING'));
-  check('back to front step', (await page.getAttribute('#dot-front', 'class')).includes('current'));
-
-  const realErrors = errors.filter(e => !/favicon/i.test(e));
+  const realErrors = errors.filter(e => !/favicon/i.test(e) && !/person\.jpg/.test(e));
   check('no console errors', realErrors.length === 0, JSON.stringify(realErrors.slice(0, 3)));
 
-  console.log(`\n${'═'.repeat(46)}\n  ${pass} passed, ${fail} failed\n${'═'.repeat(46)}`);
+  const tail = skipped ? `, ${skipped} section${skipped > 1 ? 's' : ''} skipped` : '';
+  console.log(`\n${'═'.repeat(46)}\n  ${pass} passed, ${fail} failed${tail}\n${'═'.repeat(46)}`);
   await browser.close();
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error('E2E FAIL:', e.message); process.exit(1); });

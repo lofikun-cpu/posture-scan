@@ -131,9 +131,15 @@ function unlockAudio() {
       const s = audioCtx.createBufferSource();
       s.buffer = b; s.connect(audioCtx.destination); s.start(0);
     }
-    // Build the master output now, inside the gesture: on iOS it carries a
-    // media element, and starting one outside a user interaction is blocked.
-    master();
+    // iOS never hears the live graph with the ringer switch on, so its cues
+    // are files instead. Both halves of that have to start inside the gesture:
+    // the pool can only be unlocked by a user interaction, and the render is
+    // kicked off here so the first cue is ready almost immediately after.
+    if (IS_IOS) {
+      primeCuePool();
+      renderAllCues();
+      return;
+    }
     // Only start the bed and release queued cues once the context is really
     // running — resume() resolves after the gesture on iOS.
     let released = false;
@@ -162,7 +168,8 @@ function unlockAudio() {
    ============================================================ */
 const SFX_GAIN = 0.5; // master trim for the whole cue set
 
-function sfxReady() { return voiceOn && audioCtx && audioCtx.state === 'running'; }
+function sfxReady() { return renderTarget ? true
+  : (voiceOn && audioCtx && audioCtx.state === 'running'); }
 
 /* ---- master output ----
    iOS silences Web Audio when the ringer switch is on, but plays HTML media
@@ -171,47 +178,158 @@ function sfxReady() { return voiceOn && audioCtx && audioCtx.state === 'running'
    playing that through an <audio> element makes the whole thing count as
    media playback, so it follows the same rules as the voiceover.
    Everything connects here rather than to audioCtx.destination. */
-let masterOut = null, masterEl = null;
-function master() {
-  if (masterOut) return masterOut;
-  try {
-    if (IS_IOS && audioCtx.createMediaStreamDestination) {
-      const dest = audioCtx.createMediaStreamDestination();
-      const el = document.createElement('audio');
-      el.id = 'sfx-out';
-      el.playsInline = true;
-      el.autoplay = true;
-      el.setAttribute('aria-hidden', 'true');
-      el.style.cssText = 'position:absolute;width:0;height:0;opacity:0;pointer-events:none';
-      el.srcObject = dest.stream;
-      document.body.appendChild(el);   // detached elements are unreliable on iOS
-      el.play().catch(() => {});
-      masterEl = el;
-      masterOut = dest;
-      return masterOut;
-    }
-  } catch (e) { /* fall through to the direct output */ }
-  masterOut = audioCtx.destination;
-  return masterOut;
-}
+/* On iOS the cues are pre-rendered to WAV and played as ordinary <audio>
+   elements — the same mechanism as the voiceover, which is the only thing
+   that reliably plays there. Routing live Web Audio to the speaker is muted
+   by the ringer switch, and routing it through a MediaStream element takes
+   over the audio session and silences the voiceover instead. Desktop keeps
+   the live graph, where none of this applies. */
+let renderTarget = null;                       // set while rendering offline
+const ctxOf = () => (renderTarget ? renderTarget.ctx : audioCtx);
+const outOf = () => (renderTarget ? renderTarget.out : audioCtx.destination);
 
 /* resume() is asynchronous. On iOS it does not complete within the tap, so
    any cue fired immediately afterwards found the context still suspended and
    was dropped — which is why element audio (the voiceover) played while every
    synthesized sound was silent. Cues raised before the context is running are
-   held here and released once it is. */
+   held here and released once it is. On iOS they are also held while the cue
+   files render. */
 const pendingSfx = [];
 function flushSfx() {
   const queued = pendingSfx.splice(0, pendingSfx.length);
   for (const [name, kick] of queued) sfx(name, kick);
 }
 
+/* ---- offline render → WAV → <audio>, the iOS path ----
+   Each cue is rendered once with an OfflineAudioContext (which needs no user
+   gesture and finishes far faster than real time), encoded to a WAV blob, and
+   played back through a pooled <audio> element. Element playback is the only
+   audio iOS reliably produces here, so the cues now travel the same road as
+   the voiceover instead of competing with it. */
+
+/** AudioBuffer → 16-bit PCM WAV blob. */
+function encodeWAV(buf) {
+  const ch = buf.numberOfChannels, len = buf.length, sr = buf.sampleRate;
+  const bytes = len * ch * 2;
+  const dv = new DataView(new ArrayBuffer(44 + bytes));
+  const str = (o, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
+  str(0, 'RIFF');  dv.setUint32(4, 36 + bytes, true); str(8, 'WAVE');
+  str(12, 'fmt '); dv.setUint32(16, 16, true);        dv.setUint16(20, 1, true);
+  dv.setUint16(22, ch, true);      dv.setUint32(24, sr, true);
+  dv.setUint32(28, sr * ch * 2, true); dv.setUint16(32, ch * 2, true);
+  dv.setUint16(34, 16, true);      str(36, 'data');   dv.setUint32(40, bytes, true);
+  const chans = [];
+  for (let c = 0; c < ch; c++) chans.push(buf.getChannelData(c));
+  let o = 44;
+  for (let i = 0; i < len; i++) {
+    for (let c = 0; c < ch; c++) {
+      const s = Math.max(-1, Math.min(1, chans[c][i]));
+      dv.setInt16(o, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+      o += 2;
+    }
+  }
+  return new Blob([dv.buffer], { type: 'audio/wav' });
+}
+
+/** A fraction of a second of silence — used to unlock the pool inside the tap. */
+function silentWavURL() {
+  const ac = { numberOfChannels: 1, length: 1024, sampleRate: 44100,
+               getChannelData: () => new Float32Array(1024) };
+  return URL.createObjectURL(encodeWAV(ac));
+}
+
+/* Longest tail of each cue, so the render is long enough to hold all of it.
+   Anything scheduled past the buffer is simply cut off, so these are generous
+   rather than exact. */
+const CUE_SECONDS = {
+  tap: 0.2, blip: 0.2, powerUp: 1.4, whoosh: 0.8, lock: 0.4, reject: 0.7,
+  scan: 1.0, reveal: 1.4, systemLoading: 3.8, telemetry: 0.2, swoosh: 0.45,
+  target: 0.4, staticZap: 0.6
+};
+/* Rendered first, because they fire soonest after the tap. */
+const CUE_PRIORITY = ['systemLoading', 'tap', 'powerUp', 'whoosh', 'lock', 'blip'];
+
+const cueURL = {};          // name → object URL of the rendered WAV
+let cuesRendering = false;
+
+function renderCue(name) {
+  const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  if (!OAC || !SFX[name]) return Promise.resolve();
+  const seconds = CUE_SECONDS[name] || 1;
+  let ctx;
+  try { ctx = new OAC(1, Math.ceil(44100 * seconds), 44100); }
+  catch (e) { return Promise.resolve(); }
+
+  renderTarget = { ctx, out: ctx.destination };
+  try { SFX[name](); } catch (e) { /* one bad cue must not stop the rest */ }
+  renderTarget = null;
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (buf) => {
+      if (settled) return;
+      settled = true;
+      if (buf) { try { cueURL[name] = URL.createObjectURL(encodeWAV(buf)); } catch (e) {} }
+      resolve();
+    };
+    try {
+      // older WebKit resolves through oncomplete rather than a promise
+      ctx.oncomplete = (ev) => done(ev.renderedBuffer);
+      const p = ctx.startRendering();
+      if (p && p.then) p.then(done).catch(() => done(null));
+    } catch (e) { done(null); }
+    setTimeout(() => done(null), 4000);
+  });
+}
+
+/** Render every cue, releasing queued ones as they become playable. */
+async function renderAllCues() {
+  if (cuesRendering) return;
+  cuesRendering = true;
+  const rest = Object.keys(SFX).filter(n => !CUE_PRIORITY.includes(n));
+  for (const name of CUE_PRIORITY.concat(rest)) {
+    await renderCue(name);
+    if (pendingSfx.length) flushSfx();
+  }
+}
+
+/* Pool of elements, unlocked inside the tap with a moment of silence so they
+   can be re-pointed at a cue later without another gesture. Four is enough for
+   the cues that overlap; a fifth simply steals the oldest. */
+const cuePool = [];
+let cueSlot = 0;
+function primeCuePool() {
+  if (cuePool.length) return;
+  let url;
+  try { url = silentWavURL(); } catch (e) { return; }
+  for (let i = 0; i < 4; i++) {
+    const el = new Audio();
+    el.preload = 'auto';
+    el.src = url;
+    const p = el.play();
+    if (p && p.catch) p.catch(() => {});
+    cuePool.push(el);
+  }
+}
+
+function playCueFile(url) {
+  if (!cuePool.length) return;
+  const el = cuePool[cueSlot++ % cuePool.length];
+  try {
+    if (el.src !== url) el.src = url;
+    el.currentTime = 0;
+    const p = el.play();
+    if (p && p.catch) p.catch(() => {});
+  } catch (e) {}
+}
+
 /** Pitched cue, optionally sweeping between two frequencies. */
 function tone(f0, f1, dur, { type = 'sine', gain = 0.12, delay = 0 } = {}) {
   if (!sfxReady()) return;
-  const t0 = audioCtx.currentTime + delay;
-  const osc = audioCtx.createOscillator();
-  const g = audioCtx.createGain();
+  const ac = ctxOf();
+  const t0 = ac.currentTime + delay;
+  const osc = ac.createOscillator();
+  const g = ac.createGain();
   osc.type = type;
   osc.frequency.setValueAtTime(f0, t0);
   if (f1 && f1 !== f0) osc.frequency.exponentialRampToValueAtTime(Math.max(1, f1), t0 + dur);
@@ -219,29 +337,30 @@ function tone(f0, f1, dur, { type = 'sine', gain = 0.12, delay = 0 } = {}) {
   g.gain.setValueAtTime(0.0001, t0);
   g.gain.exponentialRampToValueAtTime(gain * SFX_GAIN, t0 + Math.min(0.02, dur * 0.2));
   g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-  osc.connect(g); g.connect(master());
+  osc.connect(g); g.connect(outOf());
   osc.start(t0); osc.stop(t0 + dur + 0.02);
 }
 
 /** Filtered noise, for whooshes and sweeps. */
 function noise(dur, fFrom, fTo, gain = 0.08) {
   if (!sfxReady()) return;
-  const t0 = audioCtx.currentTime;
-  const frames = Math.ceil(audioCtx.sampleRate * dur);
-  const buf = audioCtx.createBuffer(1, frames, audioCtx.sampleRate);
+  const ac = ctxOf();
+  const t0 = ac.currentTime;
+  const frames = Math.ceil(ac.sampleRate * dur);
+  const buf = ac.createBuffer(1, frames, ac.sampleRate);
   const d = buf.getChannelData(0);
   for (let i = 0; i < frames; i++) d[i] = Math.random() * 2 - 1;
-  const src = audioCtx.createBufferSource();
+  const src = ac.createBufferSource();
   src.buffer = buf;
-  const bp = audioCtx.createBiquadFilter();
+  const bp = ac.createBiquadFilter();
   bp.type = 'bandpass'; bp.Q.value = 1.2;
   bp.frequency.setValueAtTime(fFrom, t0);
   bp.frequency.exponentialRampToValueAtTime(fTo, t0 + dur);
-  const g = audioCtx.createGain();
+  const g = ac.createGain();
   g.gain.setValueAtTime(0.0001, t0);
   g.gain.exponentialRampToValueAtTime(gain * SFX_GAIN, t0 + dur * 0.25);
   g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-  src.connect(bp); bp.connect(g); g.connect(master());
+  src.connect(bp); bp.connect(g); g.connect(outOf());
   src.start(t0); src.stop(t0 + dur);
 }
 
@@ -254,12 +373,15 @@ function noise(dur, fFrom, fTo, gain = 0.08) {
 let bed = null;
 
 function startBed() {
-  if (bed || !sfxReady()) return;
+  // iOS runs on rendered files, and a continuous drone is the one cue not
+  // worth rendering — it would be a large buffer for something the ringer
+  // switch silences anyway. Skipped there, along with its constant CPU cost.
+  if (bed || IS_IOS || !sfxReady()) return;
   const t0 = audioCtx.currentTime;
   const out = audioCtx.createGain();
   out.gain.setValueAtTime(0.0001, t0);
   out.gain.exponentialRampToValueAtTime(0.055 * SFX_GAIN, t0 + 2.5); // fades in
-  out.connect(master());
+  out.connect(outOf());
 
   // stacked low partials, slightly detuned so they beat against each other
   const oscs = [[55, 'sine', 1], [82.4, 'sine', 0.55], [110, 'triangle', 0.28]]
@@ -361,6 +483,16 @@ const SFX = {
 /** Play a cue and give the core a matching visual kick. */
 function sfx(name, kick = 0.5) {
   if (!SFX[name] || !voiceOn) return;
+  if (IS_IOS) {
+    // Still rendering: hold it rather than lose it.
+    if (!cueURL[name]) {
+      if (pendingSfx.length < 12) pendingSfx.push([name, kick]);
+      return;
+    }
+    playCueFile(cueURL[name]);
+    coreEnergy = Math.max(coreEnergy, kick);
+    return;
+  }
   // Context not up yet: hold the cue rather than lose it.
   if (!audioCtx || audioCtx.state !== 'running') {
     if (pendingSfx.length < 12) pendingSfx.push([name, kick]);
@@ -391,11 +523,11 @@ function wireAnalyser(node) {
       an.fftSize = 256;                 // 128 bins — one per pair of bars
       an.smoothingTimeConstant = 0.72;  // damped enough to read as motion, not noise
       src.connect(an);
-      an.connect(master());
+      an.connect(audioCtx.destination);
       node.analyser = an;
       node.data = new Uint8Array(an.frequencyBinCount);
     } catch (inner) {
-      try { src.connect(master()); } catch (e2) {}
+      try { src.connect(audioCtx.destination); } catch (e2) {}
     }
   } catch (e) { /* already sourced, or unsupported — audio still plays */ }
 }
@@ -2029,6 +2161,10 @@ if (['localhost', '127.0.0.1'].includes(location.hostname)) {
       analyser: !!coreAnalyser,
       ctx: audioCtx && audioCtx.state,
       queued: pendingSfx.length,
+      cues: Object.keys(cueURL).length,
+      pool: cuePool.length,
+      poolPlaying: cuePool.filter(e => !e.paused).length,
+      poolProgress: Math.max(0, ...cuePool.map(e => e.currentTime || 0)),
       t: activeVO ? activeVO.currentTime : null,
       paused: activeVO ? activeVO.paused : null,
       muted: activeVO ? (activeVO.muted || activeVO.volume === 0) : null
