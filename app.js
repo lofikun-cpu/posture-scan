@@ -65,20 +65,20 @@ document.body.classList.add('intro');
   (function loop() {
     t++;
     ctx.clearRect(0, 0, w, h);
-    ctx.strokeStyle = 'rgba(110,203,238,0.05)';
+    ctx.strokeStyle = 'rgba(36,221,221,0.05)';
     ctx.lineWidth = 1;
     for (let x = 0; x < w; x += 48) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
     for (let y = 0; y < h; y += 48) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
     for (const d of dots) {
       d.y -= d.v; if (d.y < 0) d.y = 1;
-      ctx.fillStyle = 'rgba(110,203,238,0.38)';
+      ctx.fillStyle = 'rgba(36,221,221,0.38)';
       ctx.beginPath(); ctx.arc(d.x * w, d.y * h, d.s, 0, 7); ctx.fill();
     }
     const sy = (t * 0.6) % (h + 200) - 100;
     const grad = ctx.createLinearGradient(0, sy - 60, 0, sy + 60);
-    grad.addColorStop(0, 'rgba(110,203,238,0)');
-    grad.addColorStop(0.5, 'rgba(110,203,238,0.06)');
-    grad.addColorStop(1, 'rgba(110,203,238,0)');
+    grad.addColorStop(0, 'rgba(36,221,221,0)');
+    grad.addColorStop(0.5, 'rgba(36,221,221,0.06)');
+    grad.addColorStop(1, 'rgba(36,221,221,0)');
     ctx.fillStyle = grad; ctx.fillRect(0, sy - 60, w, 120);
     requestAnimationFrame(loop);
   })();
@@ -378,12 +378,11 @@ function getVONode(key, file) {
   };
   fit(); addEventListener('resize', fit);
 
-  const BLUE = '110,203,238';
-  const HOT = '190,238,252';
-  // Secondary accents from the reference: a lime ring and magenta markers
-  // riding over the blue base.
-  const LIME = '186,232,88';
-  const MAGENTA = '255,96,178';
+  const BLUE = '36,221,221';
+  const HOT = '168,245,245';
+  // Accents sampled from the reference frames (see palette note in index.html).
+  const GOLD = '241,220,42';
+  const MAGENTA = '252,64,201';
 
   const arc = (cx, cy, r, from, to, w, alpha, col = BLUE) => {
     ctx.beginPath();
@@ -460,7 +459,7 @@ function getVONode(key, file) {
     for (let i = 0; i < 6; i++) {
       const rr = R * (0.55 + i * 0.42);
       arc(cx, cy, rr, t * (i % 2 ? -0.3 : 0.3) + i, t * (i % 2 ? -0.3 : 0.3) + i + 5.2,
-          Math.max(1, R * 0.03), (0.5 - i * 0.05), i === 2 ? LIME : BLUE);
+          Math.max(1, R * 0.03), (0.5 - i * 0.05), i === 2 ? GOLD : BLUE);
     }
     ctx.save(); ctx.translate(cx, cy); ctx.rotate(t * 0.5);
     for (let i = 0; i < 60; i++) {
@@ -468,7 +467,7 @@ function getVONode(key, file) {
       const long = i % 5 === 0;
       ctx.beginPath();
       ctx.moveTo(R * 1.05, 0); ctx.lineTo(R * (long ? 1.45 : 1.25), 0);
-      ctx.strokeStyle = `rgba(${long ? LIME : BLUE},${long ? 0.6 : 0.25})`;
+      ctx.strokeStyle = `rgba(${long ? GOLD : BLUE},${long ? 0.6 : 0.25})`;
       ctx.lineWidth = Math.max(1, R * 0.02); ctx.stroke();
     }
     ctx.restore();
@@ -520,7 +519,7 @@ function getVONode(key, file) {
       ctx.lineWidth = Math.max(1, R * 0.015);
       ctx.beginPath(); ctx.arc(px, py, R * 0.06 + pulse * R * 0.28, 0, Math.PI * 2); ctx.stroke();
     }
-    arc(cx, cy, gr * 1.22, t * 0.6, t * 0.6 + 2.4, Math.max(1.5, R * 0.045), 0.7, LIME);
+    arc(cx, cy, gr * 1.22, t * 0.6, t * 0.6 + 2.4, Math.max(1.5, R * 0.045), 0.7, GOLD);
   }
 
   function drawPanels(cx, cy, R, k) {
@@ -529,7 +528,7 @@ function getVONode(key, file) {
     for (let row = 0; row < 3; row++) {
       const py = cy + (row - 1) * R * 1.05;
       const x0 = cx - pw / 2;
-      ctx.strokeStyle = `rgba(${LIME},0.55)`;
+      ctx.strokeStyle = `rgba(${GOLD},0.55)`;
       ctx.lineWidth = Math.max(1, R * 0.018);
       ctx.strokeRect(x0, py - phh / 2, pw, phh);
       const cells = 6;
@@ -538,7 +537,7 @@ function getVONode(key, file) {
         // fill each cell progressively, sweeping left to right
         const on = clamp((t * 0.8 + row * 0.4) % 3 - i * 0.16, 0, 1);
         if (on <= 0) continue;
-        ctx.strokeStyle = `rgba(${LIME},${0.22 + on * 0.35})`;
+        ctx.strokeStyle = `rgba(${GOLD},${0.22 + on * 0.35})`;
         ctx.lineWidth = Math.max(1, R * 0.01);
         ctx.beginPath();
         ctx.moveTo(cxx, py - phh / 2); ctx.lineTo(cxx + cw, py + phh / 2);
@@ -560,7 +559,7 @@ function getVONode(key, file) {
        12–15 static burst snapping into the stable radar HUD
      ============================================================ */
   const GREEN = '90,255,140';
-  const RED = '255,70,70';
+  const RED = '237,77,66';
 
   let particles = null;
   const seg = (bt, a, z) => clamp((bt - a) / (z - a), 0, 1);
@@ -655,7 +654,7 @@ function getVONode(key, file) {
         const pg = ctx.createRadialGradient(cx, cy, 0, cx, cy, pr);
         pg.addColorStop(0, 'rgba(255,255,255,0.95)');
         pg.addColorStop(0.35, `rgba(${MAGENTA},0.8)`);
-        pg.addColorStop(0.7, `rgba(${LIME},0.6)`);
+        pg.addColorStop(0.7, `rgba(${GOLD},0.6)`);
         pg.addColorStop(1, `rgba(${GREEN},0)`);
         ctx.fillStyle = pg;
         ctx.beginPath(); ctx.arc(cx, cy, pr, 0, 7); ctx.fill();
@@ -1034,14 +1033,14 @@ function getVONode(key, file) {
         ctx.beginPath();
         ctx.moveTo(lr, 0);
         ctx.lineTo(lr + R * (long ? 0.16 : 0.09), 0);
-        ctx.strokeStyle = `rgba(${LIME},${(long ? 0.75 : 0.34) * limeIn})`;
+        ctx.strokeStyle = `rgba(${GOLD},${(long ? 0.75 : 0.34) * limeIn})`;
         ctx.lineWidth = Math.max(1, R * 0.028);
         ctx.stroke();
       }
       ctx.restore();
       // a bright partial arc sweeping around that ring
       arc(cx, cy, lr, t * 0.42, t * 0.42 + 1.05 * limeIn,
-          Math.max(1.5, R * 0.035), 0.65 * limeIn, LIME);
+          Math.max(1.5, R * 0.035), 0.65 * limeIn, GOLD);
     }
 
     // ---- magenta marker arcs, counter-rotating
@@ -1111,7 +1110,7 @@ function getVONode(key, file) {
     const readIn = ph(b, 0.55, 0.8);
     if (readIn > 0.001) {
       arc(cx, cy, R * 0.44, t * 0.7, t * 0.7 + 4.6, Math.max(1, R * 0.02), 0.6 * readIn);
-      arc(cx, cy, R * 0.26, -t * 1.1, -t * 1.1 + 3.1, Math.max(1, R * 0.018), 0.45 * readIn, LIME);
+      arc(cx, cy, R * 0.26, -t * 1.1, -t * 1.1 + 3.1, Math.max(1, R * 0.018), 0.45 * readIn, GOLD);
     }
 
     } // end ring mode
@@ -1142,7 +1141,7 @@ function getVONode(key, file) {
     // current mode name, so the cycling reads as deliberate
     if (b >= 1) {
       ctx.textAlign = 'center';
-      ctx.fillStyle = `rgba(${LIME},${0.5 * kVis})`;
+      ctx.fillStyle = `rgba(${GOLD},${0.5 * kVis})`;
       ctx.fillText('［ ' + MODE_LABEL[mode] + ' ］', cx, padTop);
     }
 
@@ -1203,7 +1202,7 @@ function getVONode(key, file) {
       ctx.strokeStyle = `rgba(${BLUE},0.45)`;
       ctx.lineWidth = Math.max(1, W * 0.002);
       ctx.strokeRect(bx, by, barW, barH);
-      ctx.fillStyle = `rgba(${LIME},0.75)`;
+      ctx.fillStyle = `rgba(${GOLD},0.75)`;
       ctx.fillRect(bx + 1, by + 1, Math.max(0, (barW - 2) * modelProgress), barH - 2);
       ctx.textBaseline = 'top';
     }
@@ -1215,11 +1214,11 @@ function getVONode(key, file) {
       const flash = 1 - clamp(age / 0.28, 0, 1);
       ctx.textAlign = 'right';
       ctx.font = `${fs * 1.05}px "Consolas", monospace`;
-      ctx.fillStyle = flash > 0.05 ? `rgba(${HOT},0.95)` : `rgba(${LIME},0.62)`;
+      ctx.fillStyle = flash > 0.05 ? `rgba(${HOT},0.95)` : `rgba(${GOLD},0.62)`;
       ctx.fillText('◂ ' + CALLOUTS[calloutIdx], W - pad, cy - fs * 0.6);
       // underline that wipes in with each new line
       const uw = fs * 7 * clamp(age / 0.5, 0, 1);
-      ctx.strokeStyle = `rgba(${LIME},0.4)`;
+      ctx.strokeStyle = `rgba(${GOLD},0.4)`;
       ctx.lineWidth = Math.max(1, W * 0.002);
       ctx.beginPath();
       ctx.moveTo(W - pad, cy + fs * 0.9);
@@ -1586,17 +1585,17 @@ function drawScene(ctx, img, W, H, lms, progress) {
     for (const [a, b] of BONES) {
       if ((lms[a].visibility ?? 1) < 0.4 || (lms[b].visibility ?? 1) < 0.4) continue;
       const pa = P(a), pb = P(b);
-      ctx.strokeStyle = 'rgba(110,203,238,0.88)';
-      ctx.shadowColor = '#6ecbee'; ctx.shadowBlur = 10;
+      ctx.strokeStyle = 'rgba(36,221,221,0.88)';
+      ctx.shadowColor = '#24dddd'; ctx.shadowBlur = 10;
       ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.lineTo(pb.x, pb.y); ctx.stroke();
     }
     ctx.shadowBlur = 0;
     for (const i of KEY_PTS) {
       if ((lms[i].visibility ?? 1) < 0.4) continue;
       const pt = P(i);
-      ctx.fillStyle = '#6ecbee';
+      ctx.fillStyle = '#24dddd';
       ctx.beginPath(); ctx.arc(pt.x, pt.y, Math.max(3, W / 220), 0, 7); ctx.fill();
-      ctx.strokeStyle = 'rgba(110,203,238,0.52)';
+      ctx.strokeStyle = 'rgba(36,221,221,0.52)';
       ctx.beginPath(); ctx.arc(pt.x, pt.y, Math.max(7, W / 90), 0, 7); ctx.stroke();
     }
   }
@@ -1604,12 +1603,12 @@ function drawScene(ctx, img, W, H, lms, progress) {
   if (progress < 1) {
     const y = H * progress;
     const grad = ctx.createLinearGradient(0, y - 40, 0, y + 40);
-    grad.addColorStop(0, 'rgba(110,203,238,0)');
-    grad.addColorStop(0.5, 'rgba(110,203,238,0.38)');
-    grad.addColorStop(1, 'rgba(110,203,238,0)');
+    grad.addColorStop(0, 'rgba(36,221,221,0)');
+    grad.addColorStop(0.5, 'rgba(36,221,221,0.38)');
+    grad.addColorStop(1, 'rgba(36,221,221,0)');
     ctx.fillStyle = grad;
     ctx.fillRect(0, y - 40, W, 80);
-    ctx.fillStyle = 'rgba(110,203,238,0.92)';
+    ctx.fillStyle = 'rgba(36,221,221,0.92)';
     ctx.fillRect(0, y, W, 2);
   }
 }
@@ -1686,13 +1685,13 @@ const VIEW_COPY = {
   }
 };
 
-const GUIDE_FRONT = `<svg viewBox="0 0 100 220" fill="none" stroke="#6ecbee" stroke-width="1.4" stroke-dasharray="4 4">
+const GUIDE_FRONT = `<svg viewBox="0 0 100 220" fill="none" stroke="#24dddd" stroke-width="1.4" stroke-dasharray="4 4">
   <circle cx="50" cy="20" r="12"/><line x1="50" y1="32" x2="50" y2="120"/>
   <line x1="28" y1="52" x2="72" y2="52"/><line x1="28" y1="52" x2="24" y2="105"/>
   <line x1="72" y1="52" x2="76" y2="105"/><line x1="34" y1="118" x2="66" y2="118"/>
   <line x1="38" y1="118" x2="36" y2="205"/><line x1="62" y1="118" x2="64" y2="205"/>
   <line x1="50" y1="0" x2="50" y2="220" stroke-width="0.7" opacity="0.5"/></svg>`;
-const GUIDE_SIDE = `<svg viewBox="0 0 100 220" fill="none" stroke="#6ecbee" stroke-width="1.4" stroke-dasharray="4 4">
+const GUIDE_SIDE = `<svg viewBox="0 0 100 220" fill="none" stroke="#24dddd" stroke-width="1.4" stroke-dasharray="4 4">
   <circle cx="54" cy="20" r="12"/><line x1="50" y1="32" x2="50" y2="120"/>
   <line x1="50" y1="55" x2="52" y2="105"/><line x1="50" y1="118" x2="50" y2="205"/>
   <line x1="50" y1="0" x2="50" y2="220" stroke-width="0.7" opacity="0.5"/></svg>`;
@@ -2114,21 +2113,21 @@ function buildShareCard(result) {
   const c = $('share-canvas'), ctx = c.getContext('2d');
   const W = c.width, H = c.height;
   ctx.fillStyle = '#03070d'; ctx.fillRect(0, 0, W, H);
-  ctx.strokeStyle = 'rgba(110,203,238,0.07)';
+  ctx.strokeStyle = 'rgba(36,221,221,0.07)';
   for (let x = 0; x < W; x += 54) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
   for (let y = 0; y < H; y += 54) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
-  ctx.strokeStyle = '#6ecbee'; ctx.lineWidth = 3;
+  ctx.strokeStyle = '#24dddd'; ctx.lineWidth = 3;
   ctx.strokeRect(40, 40, W - 80, H - 80);
 
-  ctx.fillStyle = '#6ecbee'; ctx.font = '600 42px monospace'; ctx.textAlign = 'center';
+  ctx.fillStyle = '#24dddd'; ctx.font = '600 42px monospace'; ctx.textAlign = 'center';
   ctx.fillText('KINA·OS // POSTURE.SCAN', W / 2, 130);
   ctx.fillStyle = '#7fb2c6'; ctx.font = '26px monospace';
   ctx.fillText('AI POSTURE ANALYSIS · 2-VIEW SCAN', W / 2, 176);
 
   const cx = W / 2, cy = 520, r = 235;
-  ctx.strokeStyle = 'rgba(110,203,238,0.17)'; ctx.lineWidth = 32;
+  ctx.strokeStyle = 'rgba(36,221,221,0.17)'; ctx.lineWidth = 32;
   ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.stroke();
-  const col = result.score >= 75 ? '#5fe6b0' : result.score >= 55 ? '#6ecbee' : result.score >= 40 ? '#ffb347' : '#ff5f70';
+  const col = result.score >= 75 ? '#5fe6b0' : result.score >= 55 ? '#24dddd' : result.score >= 40 ? '#ffb347' : '#ed4d42';
   ctx.strokeStyle = col; ctx.lineCap = 'round';
   ctx.shadowColor = col; ctx.shadowBlur = 30;
   ctx.beginPath(); ctx.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + (result.score / 100) * Math.PI * 2); ctx.stroke();
@@ -2151,14 +2150,14 @@ function buildShareCard(result) {
   for (const m of top) {
     const b = sevBucket(m.severity);
     ctx.fillStyle = '#b8dced'; ctx.fillText('▸ ' + m.name, 110, y);
-    ctx.fillStyle = ['#5fe6b0', '#6ecbee', '#ffb347', '#ff5f70'][b];
+    ctx.fillStyle = ['#5fe6b0', '#24dddd', '#ffb347', '#ed4d42'][b];
     ctx.textAlign = 'right'; ctx.fillText(SEV_LABELS[b], W - 110, y);
     ctx.textAlign = 'left';
     y += 52;
   }
 
   ctx.textAlign = 'center';
-  ctx.fillStyle = '#6ecbee'; ctx.font = '600 36px monospace';
+  ctx.fillStyle = '#24dddd'; ctx.font = '600 36px monospace';
   ctx.fillText('Can you beat my score?', W / 2, H - 128);
   ctx.fillStyle = '#7fb2c6'; ctx.font = '29px monospace';
   ctx.fillText(APP_URL.replace(/^https?:\/\//, ''), W / 2, H - 78);
