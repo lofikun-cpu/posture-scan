@@ -137,12 +137,28 @@
   }
   .privacy-note b { color: var(--green); }
 
-  /* ---------- KINA core stage ---------- */
+  /* ---------- KINA core stage ----------
+     Fills the viewport behind the intro overlay; hidden once the scan starts. */
   #kina-stage {
-    position: relative; width: 100%; aspect-ratio: 16 / 10;
-    border: 1px solid var(--cyan-dim); border-radius: 8px;
-    overflow: hidden; background: #01050a; margin: 4px 0 18px;
-    box-shadow: inset 0 0 60px rgba(110,203,238,0.07);
+    position: fixed; inset: 0; z-index: 1;
+    overflow: hidden; background: #01050a;
+    display: none;
+  }
+  body.intro #kina-stage { display: block; }
+  body.intro #app > header { position: relative; z-index: 3; }
+  /* intro is the animation and one button — nothing else */
+  body.intro footer { display: none; }
+
+  /* Intro screen: animation only, with the control anchored at the bottom. */
+  #intro-overlay {
+    position: relative; z-index: 3;
+    flex: 1; display: flex; flex-direction: column;
+    justify-content: flex-end;
+    padding-bottom: 8px;
+  }
+  #intro-overlay .btn {
+    backdrop-filter: blur(3px);
+    background: linear-gradient(180deg, rgba(110,203,238,0.22), rgba(3,7,13,0.55));
   }
   #kina-loop, #kina-core {
     position: absolute; inset: 0; width: 100%; height: 100%;
@@ -168,11 +184,13 @@
   /* ---------- voiceover captions ---------- */
   #vo-caption {
     display: none;
-    font-family: monospace; font-size: 13.5px; line-height: 1.65;
+    font-family: monospace; font-size: 14px; line-height: 1.6;
     color: #fff; text-align: center;
-    border-left: 2px solid var(--cyan); background: rgba(110,203,238,0.06);
-    padding: 12px 14px; border-radius: 0 6px 6px 0; margin: 4px 0 16px;
-    min-height: 68px;
+    background: rgba(3,7,13,0.72);
+    border: 1px solid var(--cyan-dim);
+    padding: 14px 16px; border-radius: 6px; margin: 0 0 14px;
+    backdrop-filter: blur(4px);
+    text-shadow: 0 0 12px rgba(110,203,238,0.5);
   }
   #vo-caption.on { display: block; }
 
@@ -357,6 +375,15 @@
 <body>
 <canvas id="bg-canvas"></canvas>
 
+<!-- KINA core: fills the viewport on the intro screen.
+     Swap in assets/kina-loop.mp4 to replace the procedural animation. -->
+<div id="kina-stage">
+  <video id="kina-loop" loop muted playsinline autoplay preload="auto"></video>
+  <canvas id="kina-core"></canvas>
+  <div id="kina-scanlines"></div>
+  <div id="kina-status">◈ SOUND ON RECOMMENDED</div>
+</div>
+
 <div id="app">
   <header>
     <div class="logo">KINA<b>·</b>OS <span style="opacity:.5">//</span> POSTURE<b>.</b>SCAN</div>
@@ -365,38 +392,13 @@
 
   <!-- STEP 1 · KINA INTRO -->
   <section class="panel active" id="panel-greet">
-    <div class="hud-frame">
-      <div class="sys-label">▸ SYSTEM ONLINE · POSTURE ANALYSIS MODULE v3.0</div>
-
-      <!-- KINA core: swap in assets/kina-loop.mp4 for the custom loop.
-           Falls back to the procedural core if the file isn't present. -->
-      <div id="kina-stage">
-        <video id="kina-loop" loop muted playsinline autoplay preload="auto"></video>
-        <canvas id="kina-core"></canvas>
-        <div id="kina-scanlines"></div>
-        <div id="kina-status">◈ AWAITING OPERATOR</div>
-      </div>
-
-      <h1 id="intro-head">How good is <span class="accent">your posture?</span></h1>
-      <div id="console" aria-live="polite"><span class="cursor"></span></div>
-
-      <!-- Voiceover caption track -->
+    <!-- Captions and controls float over the full-screen animation;
+         the stage itself lives outside #app so it can fill the viewport. -->
+    <div id="intro-overlay">
       <div id="vo-caption" aria-live="polite"></div>
-
-      <ul class="instructions" id="intro-steps">
-        <li data-n="1">You'll take <b>two photos</b> — one facing me, one side-on</li>
-        <li data-n="2">Stand 2–3 steps back so I can see <b>head to feet</b></li>
-        <li data-n="3"><b>Barefoot</b>, in fitted clothing — loose clothes hide your spine</li>
-        <li data-n="4">Stand how you <i>normally</i> stand. No cheating.</li>
-      </ul>
-
       <button class="btn" id="btn-begin">▶ Begin Briefing</button>
-      <div class="privacy-note" id="sound-hint" style="color:var(--orange);margin-top:10px">
-        🔊 TURN YOUR RINGER ON — iPhone'S SILENT SWITCH MUTES KINA
-      </div>
       <button class="btn hidden" id="btn-start">◈ I'm Ready — Start Scan</button>
       <button class="btn secondary hidden" id="btn-skip-vo">▸ Skip briefing</button>
-      <div class="privacy-note"><b>●</b> 100% ON-DEVICE AI — YOUR PHOTOS NEVER LEAVE YOUR PHONE</div>
     </div>
   </section>
 

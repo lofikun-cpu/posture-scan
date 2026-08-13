@@ -24,7 +24,18 @@ const check = (n, c, x = '') => {
   check('title set', (await page.title()).includes('POSTURE.SCAN'));
   check('test seam exposed on localhost', await page.evaluate(() => !!window.__scan));
   await page.waitForTimeout(1200);
-  check('greeting typed', (await page.textContent('#console')).includes('KINA'));
+  // Intro is the animation plus a single control — no headline, console or list.
+  check('intro strips back to one control', await page.evaluate(() => {
+    const g = document.getElementById('panel-greet');
+    const btns = [...g.querySelectorAll('.btn')].filter(b => !b.classList.contains('hidden'));
+    return !document.getElementById('console') && !document.getElementById('intro-steps')
+        && btns.length === 1 && btns[0].id === 'btn-begin';
+  }));
+  check('stage fills the viewport', await page.evaluate(() => {
+    const r = document.getElementById('kina-stage').getBoundingClientRect();
+    return Math.abs(r.width - innerWidth) < 2 && Math.abs(r.height - innerHeight) < 2;
+  }));
+  check('body flagged as intro', await page.evaluate(() => document.body.classList.contains('intro')));
 
   console.log('\n── MediaPipe integration (real model, real image)');
   const det = await page.evaluate(async () => {
@@ -143,6 +154,9 @@ const check = (n, c, x = '') => {
   await page.click('#btn-start');
   await page.waitForSelector('#panel-capture.active', { timeout: 5000 });
   check('capture panel shows', true);
+  check('full-screen stage hidden off the intro', await page.evaluate(() =>
+    !document.body.classList.contains('intro') &&
+    getComputedStyle(document.getElementById('kina-stage')).display === 'none'));
   check('front step marked current', (await page.getAttribute('#dot-front', 'class')).includes('current'));
   check('pose guide rendered', (await page.innerHTML('#pose-guide')).includes('svg'));
 

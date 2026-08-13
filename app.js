@@ -47,8 +47,11 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 function showPanel(id) {
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   $(id).classList.add('active');
+  // The full-screen KINA stage belongs to the intro only.
+  document.body.classList.toggle('intro', id === 'panel-greet');
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
+document.body.classList.add('intro');
 
 /* ---------- animated HUD background ---------- */
 (function bgFx() {
@@ -339,8 +342,6 @@ function getVONode(key, file) {
     const i = Math.floor(Math.random() * telemetry.length);
     telemetry[i].v = Math.floor(Math.random() * 900 + 100);
   }, 700);
-  let readout = 33;
-  setInterval(() => { readout = Math.max(11, Math.min(99, readout + (Math.random() * 12 - 6) | 0)); }, 900);
 
   /* ---- boot sequence ----
      Plays once on load: a point ignites, a shockwave blooms outward, then the
@@ -740,21 +741,20 @@ function getVONode(key, file) {
     ctx.beginPath(); ctx.arc(cx, cy, R * 1.02, 0, Math.PI * 2); ctx.fill();
     arc(cx, cy, R * 1.02, 0, Math.PI * 2, Math.max(1, R * 0.022), 0.55 * coreIn);
 
-    // ---- centre readout
+    // ---- centre ring (no numeric readout — it read as a countdown)
     const readIn = ph(b, 0.55, 0.8);
     if (readIn > 0.001) {
-      arc(cx, cy, R * 0.44, 0, Math.PI * 2, Math.max(1, R * 0.02), 0.7 * readIn);
-      ctx.fillStyle = `rgba(235,248,255,${0.92 * readIn})`;
-      ctx.font = `600 ${Math.max(9, R * 0.42)}px "Consolas", monospace`;
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(String(readout), cx, cy + R * 0.02);
+      arc(cx, cy, R * 0.44, t * 0.7, t * 0.7 + 4.6, Math.max(1, R * 0.02), 0.6 * readIn);
+      arc(cx, cy, R * 0.26, -t * 1.1, -t * 1.1 + 3.1, Math.max(1, R * 0.018), 0.45 * readIn, LIME);
     }
 
     } // end ring mode
     ctx.restore();
 
     // ---- corner telemetry, revealed row by row
+    // The stage is full-viewport, so the top inset clears the page header.
     const pad = Math.max(8, W * 0.022);
+    const padTop = pad + H * 0.062;
     const fs = Math.max(7, W * 0.0165);
     ctx.font = `${fs}px "Consolas", monospace`;
     ctx.textBaseline = 'top';
@@ -763,27 +763,31 @@ function getVONode(key, file) {
     telemetry.forEach((row, i) => {
       if (i / telemetry.length > telIn) return;
       ctx.fillStyle = `rgba(${BLUE},0.42)`;
-      ctx.fillText(row.k, pad, pad + i * fs * 1.75);
+      ctx.fillText(row.k, pad, padTop + i * fs * 1.75);
       ctx.fillStyle = `rgba(${HOT},0.55)`;
-      ctx.fillText(String(row.v), pad + fs * 5.6, pad + i * fs * 1.75);
+      ctx.fillText(String(row.v), pad + fs * 5.6, padTop + i * fs * 1.75);
     });
     ctx.textAlign = 'right';
     ['ALIGNMENT', 'FRONTAL', 'SAGITTAL', 'CONFIDENCE'].forEach((k, i) => {
       if (i / 4 > telIn) return;
       ctx.fillStyle = `rgba(${BLUE},0.34)`;
-      ctx.fillText(k, W - pad, pad + i * fs * 1.75);
+      ctx.fillText(k, W - pad, padTop + i * fs * 1.75);
     });
     // current mode name, so the cycling reads as deliberate
     if (b >= 1) {
       ctx.textAlign = 'center';
       ctx.fillStyle = `rgba(${LIME},${0.5 * kVis})`;
-      ctx.fillText('［ ' + MODE_LABEL[mode] + ' ］', cx, pad);
+      ctx.fillText('［ ' + MODE_LABEL[mode] + ' ］', cx, padTop);
     }
 
-    // ---- scan modules coming online, bottom-left, one after another
+    // ---- scan modules coming online, bottom-left, one after another.
+    //      They retire a couple of seconds after boot so they don't sit
+    //      behind the control at the bottom of the screen.
+    const sinceBoot = (performance.now() - bootStart) / 1000 - BOOT_MS / 1000;
+    const modFade = 1 - clamp((sinceBoot - 2) / 1.8, 0, 1);
     ctx.textAlign = 'left';
-    SCAN_MODULES.forEach((m, i) => {
-      const on = clamp((b - m.at) / 0.1, 0, 1);
+    if (modFade > 0.01) SCAN_MODULES.forEach((m, i) => {
+      const on = clamp((b - m.at) / 0.1, 0, 1) * modFade;
       if (on <= 0) return;
       // offset clears the status line pinned to the bottom of the stage
       const y = H - pad - fs * 1.75 * (SCAN_MODULES.length - i) - fs * 3.4;
@@ -1362,13 +1366,6 @@ const hideError = () => { $('err-box').style.display = 'none'; };
 const showWarn = (msg) => { const b = $('warn-box'); b.textContent = 'ⓘ ' + msg; b.style.display = 'block'; };
 const hideWarn = () => { $('warn-box').style.display = 'none'; };
 
-const GREET_TEXT =
-  'Good day. I am KINA — your personal posture intelligence.\n' +
-  'I will scan you from two angles and grade your alignment out of 100.\n' +
-  'Very few humans achieve a perfect score. Let us see what you are made of.';
-
-typeLines($('console'), GREET_TEXT.split('\n'));
-
 /* ---------- intro briefing ----------
    Audio needs a user gesture on mobile, so the briefing starts on tap.
    The muted loop autoplays before that; only the voiceover waits. */
@@ -1381,10 +1378,7 @@ async function runBriefing() {
   sfx('powerUp', 0.9);
   await sleep(650); // let the power-up land before KINA speaks over it
   $('btn-begin').classList.add('hidden');
-  $('sound-hint').classList.add('hidden');
   $('btn-skip-vo').classList.remove('hidden');
-  $('intro-steps').classList.add('hidden');
-  $('console').classList.add('hidden');
   $('kina-status').textContent = '◈ BRIEFING IN PROGRESS';
 
   getLandmarker().catch(() => {}); // pre-warm the model during the briefing
@@ -1397,7 +1391,6 @@ function endBriefing() {
   $('btn-skip-vo').classList.add('hidden');
   $('btn-begin').classList.add('hidden');
   $('btn-start').classList.remove('hidden');
-  $('intro-steps').classList.remove('hidden');
   $('kina-status').textContent = '◈ READY WHEN YOU ARE';
 }
 
