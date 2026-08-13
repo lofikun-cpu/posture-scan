@@ -1145,14 +1145,34 @@ function getVONode(key, file) {
     ctx.restore();
 
     // ---- core disc
+    // Blown-out white-hot centre, as in the reference — the pupil clips to
+    // white and only falls to cyan well outside it.
     const coreIn = ph(b, 0.10, 0.45);
+    const heat = 0.72 + coreEnergy * 0.28;
     const iris = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 1.02);
-    iris.addColorStop(0, `rgba(${HOT},${(0.30 + coreEnergy * 0.30) * coreIn})`);
-    iris.addColorStop(0.55, `rgba(${BLUE},${0.16 * coreIn})`);
+    iris.addColorStop(0, `rgba(255,255,255,${0.95 * heat * coreIn})`);
+    iris.addColorStop(0.18, `rgba(255,255,255,${0.72 * heat * coreIn})`);
+    iris.addColorStop(0.38, `rgba(${HOT},${0.55 * heat * coreIn})`);
+    iris.addColorStop(0.68, `rgba(${BLUE},${0.22 * coreIn})`);
     iris.addColorStop(1, `rgba(${BLUE},0.02)`);
     ctx.fillStyle = iris;
     ctx.beginPath(); ctx.arc(cx, cy, R * 1.02, 0, Math.PI * 2); ctx.fill();
     arc(cx, cy, R * 1.02, 0, Math.PI * 2, Math.max(1, R * 0.022), 0.55 * coreIn);
+
+    // dense short spokes radiating out of the hot centre
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(-t * 0.35);
+    for (let i = 0; i < 90; i++) {
+      ctx.rotate(Math.PI * 2 / 90);
+      const len = R * (0.16 + 0.10 * Math.abs(Math.sin(i * 1.3 + t * 2)));
+      ctx.beginPath();
+      ctx.moveTo(R * 0.52, 0); ctx.lineTo(R * 0.52 + len, 0);
+      ctx.strokeStyle = `rgba(${HOT},${(0.16 + 0.24 * heat) * coreIn})`;
+      ctx.lineWidth = Math.max(1, R * 0.012);
+      ctx.stroke();
+    }
+    ctx.restore();
 
     // ---- centre ring (no numeric readout — it read as a countdown)
     const readIn = ph(b, 0.55, 0.8);
