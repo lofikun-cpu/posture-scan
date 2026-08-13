@@ -131,6 +131,9 @@ function unlockAudio() {
       const s = audioCtx.createBufferSource();
       s.buffer = b; s.connect(audioCtx.destination); s.start(0);
     }
+    // Build the master output now, inside the gesture: on iOS it carries a
+    // media element, and starting one outside a user interaction is blocked.
+    master();
     // Only start the bed and release queued cues once the context is really
     // running — resume() resolves after the gesture on iOS.
     let released = false;
@@ -161,6 +164,37 @@ const SFX_GAIN = 0.5; // master trim for the whole cue set
 
 function sfxReady() { return voiceOn && audioCtx && audioCtx.state === 'running'; }
 
+/* ---- master output ----
+   iOS silences Web Audio when the ringer switch is on, but plays HTML media
+   elements regardless — which is why the recorded voiceover was audible while
+   every synthesized cue was not. Routing the graph into a MediaStream and
+   playing that through an <audio> element makes the whole thing count as
+   media playback, so it follows the same rules as the voiceover.
+   Everything connects here rather than to audioCtx.destination. */
+let masterOut = null, masterEl = null;
+function master() {
+  if (masterOut) return masterOut;
+  try {
+    if (IS_IOS && audioCtx.createMediaStreamDestination) {
+      const dest = audioCtx.createMediaStreamDestination();
+      const el = document.createElement('audio');
+      el.id = 'sfx-out';
+      el.playsInline = true;
+      el.autoplay = true;
+      el.setAttribute('aria-hidden', 'true');
+      el.style.cssText = 'position:absolute;width:0;height:0;opacity:0;pointer-events:none';
+      el.srcObject = dest.stream;
+      document.body.appendChild(el);   // detached elements are unreliable on iOS
+      el.play().catch(() => {});
+      masterEl = el;
+      masterOut = dest;
+      return masterOut;
+    }
+  } catch (e) { /* fall through to the direct output */ }
+  masterOut = audioCtx.destination;
+  return masterOut;
+}
+
 /* resume() is asynchronous. On iOS it does not complete within the tap, so
    any cue fired immediately afterwards found the context still suspended and
    was dropped — which is why element audio (the voiceover) played while every
@@ -185,7 +219,7 @@ function tone(f0, f1, dur, { type = 'sine', gain = 0.12, delay = 0 } = {}) {
   g.gain.setValueAtTime(0.0001, t0);
   g.gain.exponentialRampToValueAtTime(gain * SFX_GAIN, t0 + Math.min(0.02, dur * 0.2));
   g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-  osc.connect(g); g.connect(audioCtx.destination);
+  osc.connect(g); g.connect(master());
   osc.start(t0); osc.stop(t0 + dur + 0.02);
 }
 
@@ -207,7 +241,7 @@ function noise(dur, fFrom, fTo, gain = 0.08) {
   g.gain.setValueAtTime(0.0001, t0);
   g.gain.exponentialRampToValueAtTime(gain * SFX_GAIN, t0 + dur * 0.25);
   g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-  src.connect(bp); bp.connect(g); g.connect(audioCtx.destination);
+  src.connect(bp); bp.connect(g); g.connect(master());
   src.start(t0); src.stop(t0 + dur);
 }
 
@@ -225,7 +259,7 @@ function startBed() {
   const out = audioCtx.createGain();
   out.gain.setValueAtTime(0.0001, t0);
   out.gain.exponentialRampToValueAtTime(0.055 * SFX_GAIN, t0 + 2.5); // fades in
-  out.connect(audioCtx.destination);
+  out.connect(master());
 
   // stacked low partials, slightly detuned so they beat against each other
   const oscs = [[55, 'sine', 1], [82.4, 'sine', 0.55], [110, 'triangle', 0.28]]
@@ -352,11 +386,11 @@ function wireAnalyser(node) {
       an.fftSize = 256;                 // 128 bins — one per pair of bars
       an.smoothingTimeConstant = 0.72;  // damped enough to read as motion, not noise
       src.connect(an);
-      an.connect(audioCtx.destination);
+      an.connect(master());
       node.analyser = an;
       node.data = new Uint8Array(an.frequencyBinCount);
     } catch (inner) {
-      try { src.connect(audioCtx.destination); } catch (e2) {}
+      try { src.connect(master()); } catch (e2) {}
     }
   } catch (e) { /* already sourced, or unsupported — audio still plays */ }
 }
