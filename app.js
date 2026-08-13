@@ -96,6 +96,8 @@ document.body.classList.add('intro');
 let modelProgress = 0;    // 0–1 while the pose model downloads
 let modelLoading = false;
 let activeVO = null;      // voiceover element currently playing
+let activeEnv = null;     // its precomputed loudness envelope, when built
+let envSmooth = 0;        // attack/release smoothing for that envelope
 
 /* Boot runs on the Begin tap, not on load, so the sequence can be scored —
    browsers block audio until the user interacts. */
@@ -556,9 +558,118 @@ function getVONode(key, file) {
     el.preload = 'auto';
     el.playsInline = true;
     el.src = file;
-    voNodes[key] = { el, analyser: null, data: null, wired: false };
+    voNodes[key] = { el, analyser: null, data: null, wired: false, env: null, envBuilt: false };
   }
   return voNodes[key];
+}
+
+/* ============================================================
+   LOUDNESS ENVELOPE
+
+   The ring is supposed to move with KINA's voice. Where Web Audio can see the
+   playing element, that comes from a live analyser. iOS can't: routing the
+   voiceover through Web Audio silences it there, so the core was falling back
+   to a speech-shaped sine — motion that looked plausible on its own but had no
+   relationship to what was actually being said.
+
+   So the recording is measured up front instead. It is decoded once with an
+   OfflineAudioContext (no speaker, no audio session, no gesture required) and
+   reduced to per-frame loudness, split into three bands so the bars have
+   somewhere to move as well as how far. Playback then just reads the value for
+   the element's current time — which is not an approximation of the voice, it
+   IS the voice, sampled ahead of time.
+   ============================================================ */
+const ENV_HOP = 1 / 60;     // one value per animation frame
+
+/** Root-mean-square of a slice — loudness as the ear weights it. */
+function rmsOf(d, from, to) {
+  let sum = 0;
+  for (let i = from; i < to; i++) sum += d[i] * d[i];
+  return Math.sqrt(sum / Math.max(1, to - from));
+}
+
+/** Scale so typical speech fills the range, rather than the single loudest peak. */
+function normaliseBand(band) {
+  const sorted = Float32Array.from(band).sort();
+  const peak = sorted[Math.floor(sorted.length * 0.97)] || sorted[sorted.length - 1] || 1;
+  for (let i = 0; i < band.length; i++) {
+    // gentle compression — quiet syllables should still move the ring
+    band[i] = Math.min(1, Math.pow(band[i] / peak, 0.7));
+  }
+  return band;
+}
+
+/* Three measured bands widened into the bin array the bars already read, so
+   the same drawing code serves the live analyser and the measured envelope. */
+const SPEC_BINS = 64;
+const specBuf = new Uint8Array(SPEC_BINS);
+function fillSpec(lo, mid, hi) {
+  for (let i = 0; i < SPEC_BINS; i++) {
+    const p = i / (SPEC_BINS - 1);
+    const v = p < 0.5 ? lo + (mid - lo) * (p / 0.5)
+                      : mid + (hi - mid) * ((p - 0.5) / 0.5);
+    specBuf[i] = Math.max(0, Math.min(255, v * 255));
+  }
+  return specBuf;
+}
+
+/** One-pole low-pass, run in place over a copy. */
+function lowPass(d, sr, hz) {
+  const out = new Float32Array(d.length);
+  const a = 1 - Math.exp(-2 * Math.PI * hz / sr);
+  let y = 0;
+  for (let i = 0; i < d.length; i++) { y += a * (d[i] - y); out[i] = y; }
+  return out;
+}
+
+async function buildEnvelope(node, file) {
+  if (!node || node.envBuilt) return;
+  node.envBuilt = true;
+  try {
+    const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    if (!OAC || !window.fetch) return;
+    const res = await fetch(file);
+    if (!res.ok) return;
+    const raw = await res.arrayBuffer();
+    // 22.05 kHz is ample for a loudness curve and halves the decode work.
+    const ctx = new OAC(1, 1024, 22050);
+    const buf = await new Promise((ok, no) => {
+      const p = ctx.decodeAudioData(raw, ok, no);   // callback form for older WebKit
+      if (p && p.then) p.then(ok).catch(no);
+    });
+
+    const d = buf.getChannelData(0);
+    const sr = buf.sampleRate;
+    // Split into three bands with cascaded one-pole filters: cheap, one pass
+    // each, and enough to tell a vowel from a consonant.
+    const lowB = lowPass(d, sr, 300);
+    const midB = lowPass(d, sr, 2200);
+
+    const hop = Math.max(1, Math.round(sr * ENV_HOP));
+    const n = Math.floor(d.length / hop);
+    const all = new Float32Array(n), lo = new Float32Array(n),
+          mid = new Float32Array(n), hi = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const s = i * hop, e = s + hop;
+      all[i] = rmsOf(d, s, e);
+      lo[i] = rmsOf(lowB, s, e);
+      let m = 0, h = 0;
+      for (let j = s; j < e; j++) {
+        const mv = midB[j] - lowB[j];   // 300 Hz – 2.2 kHz
+        const hv = d[j] - midB[j];      // above 2.2 kHz
+        m += mv * mv; h += hv * hv;
+      }
+      mid[i] = Math.sqrt(m / hop);
+      hi[i] = Math.sqrt(h / hop);
+    }
+    node.env = {
+      all: normaliseBand(all), lo: normaliseBand(lo),
+      mid: normaliseBand(mid), hi: normaliseBand(hi), n
+    };
+    // Measuring a long file can outlast the start of the line it belongs to.
+    // Hand it straight to the core so the ring picks it up mid-sentence.
+    if (activeVO && node.el === activeVO) activeEnv = node.env;
+  } catch (e) { /* the sine fallback covers it */ }
 }
 
 (function kinaCore() {
@@ -803,12 +914,27 @@ function getVONode(key, file) {
       let sum = 0;
       for (let i = 0; i < spec.length; i++) sum += spec[i];
       coreEnergy = Math.max(coreEnergy, Math.min(1, (sum / spec.length) / 96));
+    } else if (activeVO && !activeVO.paused && !activeVO.ended && activeEnv) {
+      // No analyser (iOS), but the recording was measured up front — so read
+      // the real loudness at the position being played. Attack is fast and
+      // release slower, which is how a level meter reads as voice rather than
+      // as flicker.
+      const i = Math.min(activeEnv.n - 1,
+                         Math.max(0, Math.round(activeVO.currentTime / ENV_HOP)));
+      const v = activeEnv.all[i] || 0;
+      envSmooth += (v - envSmooth) * (v > envSmooth ? 0.85 : 0.45);
+      // Assigned, not max'd against the decaying previous value: the measured
+      // level is better information than what was left over from last frame,
+      // and max-ing it made the ring hang above the voice on every falling
+      // syllable — motion that looked busy but ran late.
+      coreEnergy = 0.08 + envSmooth * 0.92;
+      spec = fillSpec(activeEnv.lo[i], activeEnv.mid[i], activeEnv.hi[i]);
     } else if (activeVO && !activeVO.paused && !activeVO.ended) {
-      // No analyser available (iOS). Drive the core from a speech-shaped
-      // envelope so it still reacts while KINA talks — layered rates plus
-      // occasional dips read as phrasing rather than a steady throb.
-      // Multiplied rather than summed: summing absolute sines almost never
-      // dips, which pins the value at its ceiling instead of animating.
+      // Envelope not built yet, or the file could not be measured. Drive the
+      // core from a speech-shaped curve so it still reacts while KINA talks —
+      // layered rates plus occasional dips read as phrasing rather than a
+      // steady throb. Multiplied rather than summed: summing absolute sines
+      // almost never dips, which pins the value at its ceiling.
       const syllable = Math.sin(t * 5.9) * 0.5 + 0.5;    // fast, syllabic
       const phrase = Math.sin(t * 1.6) * 0.38 + 0.62;    // slower, phrasing
       const gap = Math.sin(t * 0.9) > 0.88 ? 0.2 : 1;    // occasional breath
@@ -1326,6 +1452,7 @@ function playVO(key) {
     if (cap) cap.classList.remove('on');
     if (stage) stage.classList.remove('speaking');
     activeVO = null;
+    activeEnv = null;
     coreAnalyser = null;
   };
 
@@ -1342,16 +1469,23 @@ function playVO(key) {
       audio = node.el;
       wireAnalyser(node); // no-op unless the context is already running
       coreAnalyser = node.analyser ? { an: node.analyser, data: node.data } : null;
+      // Measure the recording only where it is actually needed: a live
+      // analyser is better still, so desktop is spared the extra fetch and
+      // decode. The envelope is picked up mid-line the moment it lands.
+      if (IS_IOS || !node.analyser) buildEnvelope(node, spec.file);
 
       const onPlaying = () => {
         audioLive = true;
         activeVO = audio;
+        activeEnv = node.env;
+        envSmooth = 0;
         if (isFinite(audio.duration) && audio.duration > 0) durationMs = audio.duration * 1000;
       };
       const useSpeech = () => {
         if (audioLive || cancelled) return;
         try { audio.pause(); } catch (e) {}
         audio = null;
+        activeEnv = null;
         coreAnalyser = null;
         speakLines(lines); // fire and forget — the caption walk owns the timing
       };
@@ -1385,7 +1519,10 @@ function playVO(key) {
       const pos = Math.min(1, elapsed / durationMs);
       // Floor only — keeps the core alive between words. Pinning it high here
       // overrode both the analyser and the iOS envelope, so nothing reacted.
-      coreEnergy = Math.max(coreEnergy, 0.22);
+      // Skipped entirely once a measured envelope is driving the core: it
+      // carries its own floor, and clamping the quiet parts flattens exactly
+      // the contrast that makes the ring look like it is listening.
+      if (!activeEnv) coreEnergy = Math.max(coreEnergy, 0.22);
       let acc = 0;
       for (let i = 0; i < weights.length; i++) {
         acc += weights[i] / total;
@@ -1680,6 +1817,10 @@ async function runBriefing() {
   $('ios-sound').classList.add('hidden');
   $('btn-skip-vo').classList.remove('hidden');
   $('kina-status').textContent = '';
+
+  // Measure the briefing while the loading cue holds the gap, so the ring is
+  // tracking the real voice from his first word rather than catching up.
+  if (IS_IOS) buildEnvelope(getVONode('intro', VO_LINES.intro.file), VO_LINES.intro.file);
 
   bootStart = performance.now();
   bootRunning = true;
@@ -2176,6 +2317,12 @@ if (['localhost', '127.0.0.1'].includes(location.hostname)) {
       analyser: !!coreAnalyser,
       ctx: audioCtx && audioCtx.state,
       queued: pendingSfx.length,
+      env: !!activeEnv,
+      // what the recording is actually doing at this instant, for comparison
+      envAt: activeEnv && activeVO
+        ? activeEnv.all[Math.min(activeEnv.n - 1,
+            Math.max(0, Math.round(activeVO.currentTime / ENV_HOP)))]
+        : null,
       cues: Object.keys(cueURL).length,
       cueChannel: !!cueEl,
       cueProgress: cueEl ? cueEl.currentTime : 0,
