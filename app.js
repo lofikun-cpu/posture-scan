@@ -131,7 +131,18 @@ function unlockAudio() {
       const s = audioCtx.createBufferSource();
       s.buffer = b; s.connect(audioCtx.destination); s.start(0);
     }
-    startBed(); // the drone runs from the first tap onward
+    // Only start the bed and release queued cues once the context is really
+    // running — resume() resolves after the gesture on iOS.
+    let released = false;
+    const go = () => { if (released) return; released = true; startBed(); flushSfx(); };
+    if (audioCtx.state === 'running') go();
+    else {
+      const r = audioCtx.resume();
+      if (r && r.then) r.then(go).catch(() => {});
+      else setTimeout(go, 60);
+      // last resort for builds where resume() neither resolves nor throws
+      setTimeout(() => { if (audioCtx && audioCtx.state === 'running') go(); }, 400);
+    }
   } catch (e) { audioCtx = null; }
 }
 
@@ -149,6 +160,17 @@ function unlockAudio() {
 const SFX_GAIN = 0.5; // master trim for the whole cue set
 
 function sfxReady() { return voiceOn && audioCtx && audioCtx.state === 'running'; }
+
+/* resume() is asynchronous. On iOS it does not complete within the tap, so
+   any cue fired immediately afterwards found the context still suspended and
+   was dropped — which is why element audio (the voiceover) played while every
+   synthesized sound was silent. Cues raised before the context is running are
+   held here and released once it is. */
+const pendingSfx = [];
+function flushSfx() {
+  const queued = pendingSfx.splice(0, pendingSfx.length);
+  for (const [name, kick] of queued) sfx(name, kick);
+}
 
 /** Pitched cue, optionally sweeping between two frequencies. */
 function tone(f0, f1, dur, { type = 'sine', gain = 0.12, delay = 0 } = {}) {
@@ -304,9 +326,14 @@ const SFX = {
 
 /** Play a cue and give the core a matching visual kick. */
 function sfx(name, kick = 0.5) {
-  if (!SFX[name]) return;
+  if (!SFX[name] || !voiceOn) return;
+  // Context not up yet: hold the cue rather than lose it.
+  if (!audioCtx || audioCtx.state !== 'running') {
+    if (pendingSfx.length < 12) pendingSfx.push([name, kick]);
+    return;
+  }
   SFX[name]();
-  if (sfxReady()) coreEnergy = Math.max(coreEnergy, kick);
+  coreEnergy = Math.max(coreEnergy, kick);
 }
 
 /* Route a voiceover element through an analyser so the spectrum ring follows
@@ -1950,6 +1977,7 @@ if (['localhost', '127.0.0.1'].includes(location.hostname)) {
       energy: coreEnergy,
       analyser: !!coreAnalyser,
       ctx: audioCtx && audioCtx.state,
+      queued: pendingSfx.length,
       t: activeVO ? activeVO.currentTime : null,
       paused: activeVO ? activeVO.paused : null,
       muted: activeVO ? (activeVO.muted || activeVO.volume === 0) : null
