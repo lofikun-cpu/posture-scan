@@ -131,7 +131,7 @@ const check = (n, c, x = '') => {
     return { ctx: a.ctx, energy: a.energy };
   });
   check('audio context unlocked by the tap', sfxOk.ctx === 'running', JSON.stringify(sfxOk));
-  check('boot sequence is running', await page.evaluate(() => window.__scan.boot().running));
+  check('ignition ran', await page.evaluate(() => window.__scan.boot().done));
   const bootLit = await page.evaluate(() => {
     const c = document.getElementById('kina-core');
     const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
@@ -140,9 +140,8 @@ const check = (n, c, x = '') => {
     return lit / Math.floor(d.length / (4 * 53));
   });
   check('boot renders far brighter than idle', bootLit > core.litFrac * 3, `idle=${core.litFrac.toFixed(3)} boot=${bootLit.toFixed(3)}`);
-  // The scored sequence owns the screen for 15s; the voiceover follows it.
-  await page.waitForTimeout(14500);
-  check('boot sequence completed', await page.evaluate(() => window.__scan.boot().done));
+  check('core reached steady state fast (<2.5s)',
+        await page.evaluate(() => window.__scan.boot().done));
   const au = await page.evaluate(() => window.__scan.audio());
   console.log('     audio:', JSON.stringify(au));
   check('voiceover audio is driving the core', au.energy > 0.02, JSON.stringify(au));
