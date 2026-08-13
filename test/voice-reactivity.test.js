@@ -13,6 +13,22 @@ const check = (n, c, x = '') => {
   if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n} ${x}`); }
 };
 
+/** How the bar ring reads: how much neighbouring bins differ, and how far the
+    values spread. A smooth ramp scores near zero on the first — which is what
+    an interpolation between three band values produced, and why the ring
+    expanded as one even annulus on iOS instead of rippling. */
+function specStats(frames) {
+  const per = frames.map(a => {
+    let d = 0;
+    for (let i = 1; i < a.length; i++) d += Math.abs(a[i] - a[i - 1]);
+    const mean = a.reduce((s, v) => s + v, 0) / a.length;
+    const sd = Math.sqrt(a.reduce((s, v) => s + (v - mean) ** 2, 0) / a.length);
+    return { rough: d / (a.length - 1), sd, mean, bins: a.length };
+  });
+  const avg = k => per.reduce((s, v) => s + v[k], 0) / per.length;
+  return { rough: avg('rough'), sd: avg('sd'), mean: avg('mean'), bins: per[0].bins };
+}
+
 /** Pearson correlation — 1 is lockstep, 0 is unrelated. */
 function correlate(a, b) {
   const n = Math.min(a.length, b.length);
@@ -30,6 +46,8 @@ const UA = {
   ios: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
   desk: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36'
 };
+
+const seen = {};
 
 (async () => {
   const b = await chromium.launch({
@@ -62,6 +80,15 @@ const UA = {
       }
       return out;
     });
+    const specFrames = (await p.evaluate(async () => {
+      const out = [];
+      for (let f = 0; f < 10; f++) {
+        out.push(Array.from(window.__scan.spectrum() || []));
+        await new Promise(r => requestAnimationFrame(() => setTimeout(r, 55)));
+      }
+      return out;
+    })).filter(a => a.length);
+
     const a = await p.evaluate(() => window.__scan.audio());
     const energies = rec.map(r => r.e);
     const spread = Math.max(...energies) - Math.min(...energies);
@@ -84,7 +111,35 @@ const UA = {
       check('live analyser in use', a.analyser === true, JSON.stringify(a));
     }
 
+    check('the bars are given a spectrum to read', specFrames.length > 0,
+          `${specFrames.length} frames captured`);
+    if (specFrames.length) {
+      seen[ios ? 'ios' : 'desk'] = specStats(specFrames);
+      const st = seen[ios ? 'ios' : 'desk'];
+      console.log(`    spectrum: ${st.bins} bins, bin-to-bin ${st.rough.toFixed(1)},` +
+                  ` spread ${st.sd.toFixed(1)}, mean ${st.mean.toFixed(1)}`);
+    }
+
     await p.close();
+  }
+
+  // The complaint that prompted this: the ring looked different on the phone.
+  // It was — one platform was drawing a real spectrum and the other a ramp.
+  console.log('\n── iOS against desktop');
+  if (seen.ios && seen.desk) {
+    check('same number of bins', seen.ios.bins === seen.desk.bins,
+          `${seen.ios.bins} vs ${seen.desk.bins}`);
+    check('bars vary bin to bin, not as a smooth ramp',
+          seen.ios.rough > seen.desk.rough * 0.6,
+          `iOS ${seen.ios.rough.toFixed(1)} vs desktop ${seen.desk.rough.toFixed(1)}`);
+    check('not jagged either — within half again of desktop',
+          seen.ios.rough < seen.desk.rough * 1.6,
+          `iOS ${seen.ios.rough.toFixed(1)} vs desktop ${seen.desk.rough.toFixed(1)}`);
+    check('sits at a comparable level, so the bars do not clip flat',
+          seen.ios.mean < seen.desk.mean * 1.5,
+          `iOS ${seen.ios.mean.toFixed(1)} vs desktop ${seen.desk.mean.toFixed(1)}`);
+  } else {
+    check('both platforms reported a spectrum', false, JSON.stringify(seen));
   }
 
   await b.close();

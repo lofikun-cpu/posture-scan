@@ -106,6 +106,7 @@ let bootRunning = false;
 let bootDone = false;
 
 let coreEnergy = 0;       // 0 idle, 1 speaking — drives glow and bar height
+let lastSpec = null;      // the bin array the bars drew from, for the test seam
 let coreAnalyser = null;  // live FFT of the voiceover, when Web Audio is available
 let audioCtx = null;
 
@@ -575,8 +576,8 @@ function getVONode(key, file) {
 
    So the recording is measured up front instead. It is decoded once with an
    OfflineAudioContext (no speaker, no audio session, no gesture required) and
-   reduced to per-frame loudness, split into three bands so the bars have
-   somewhere to move as well as how far. Playback then just reads the value for
+   reduced to a per-frame loudness value and a per-frame spectrum, so the bars
+   get where to move as well as how far. Playback then just reads the values for
    the element's current time — which is not an approximation of the voice, it
    IS the voice, sampled ahead of time.
    ============================================================ */
@@ -600,27 +601,58 @@ function normaliseBand(band) {
   return band;
 }
 
-/* Three measured bands widened into the bin array the bars already read, so
-   the same drawing code serves the live analyser and the measured envelope. */
-const SPEC_BINS = 64;
-const specBuf = new Uint8Array(SPEC_BINS);
-function fillSpec(lo, mid, hi) {
-  for (let i = 0; i < SPEC_BINS; i++) {
-    const p = i / (SPEC_BINS - 1);
-    const v = p < 0.5 ? lo + (mid - lo) * (p / 0.5)
-                      : mid + (hi - mid) * ((p - 0.5) / 0.5);
-    specBuf[i] = Math.max(0, Math.min(255, v * 255));
+/* ---- spectrum ----
+   Three broad bands were not enough. The bars read the band values across the
+   ring, so interpolating between three numbers gave a smooth ramp: every bar
+   moved together and the ring expanded as one uniform shape. The live analyser
+   on desktop hands the same code 128 independent bins, which is what makes it
+   ripple. So the offline pass computes a real spectrum too — same drawing code,
+   same character, on both. */
+const BANDS = 128;          // matches the live analyser's bin count
+const FFT_N = 1024;         // ~46 ms at 22.05 kHz — the resolution is what
+                            // gives the ring its texture; 512 smeared it flat
+const SPEC_STRIDE = 2;      // spectrum every other frame; smoothing hides the rest
+
+/** Iterative in-place radix-2 FFT. `im` starts zeroed for real input. */
+function fft(re, im) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) {          // bit-reversal permutation
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) {
+      let t = re[i]; re[i] = re[j]; re[j] = t;
+      t = im[i]; im[i] = im[j]; im[j] = t;
+    }
   }
-  return specBuf;
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = -2 * Math.PI / len;
+    const wr = Math.cos(ang), wi = Math.sin(ang);
+    const half = len >> 1;
+    for (let i = 0; i < n; i += len) {
+      let cr = 1, ci = 0;
+      for (let k = 0; k < half; k++) {
+        const ur = re[i + k], ui = im[i + k];
+        const xr = re[i + k + half], xi = im[i + k + half];
+        const vr = xr * cr - xi * ci, vi = xr * ci + xi * cr;
+        re[i + k] = ur + vr; im[i + k] = ui + vi;
+        re[i + k + half] = ur - vr; im[i + k + half] = ui - vi;
+        const ncr = cr * wr - ci * wi;
+        ci = cr * wi + ci * wr; cr = ncr;
+      }
+    }
+  }
 }
 
-/** One-pole low-pass, run in place over a copy. */
-function lowPass(d, sr, hz) {
-  const out = new Float32Array(d.length);
-  const a = 1 - Math.exp(-2 * Math.PI * hz / sr);
-  let y = 0;
-  for (let i = 0; i < d.length; i++) { y += a * (d[i] - y); out[i] = y; }
-  return out;
+/** Log-spaced band edges, in FFT bins — speech spreads evenly that way. */
+function bandEdges(sr) {
+  const lo = 80, hi = Math.min(8000, sr / 2 - 100);
+  const edges = new Int32Array(BANDS + 1);
+  for (let i = 0; i <= BANDS; i++) {
+    const f = lo * Math.pow(hi / lo, i / BANDS);
+    edges[i] = Math.min(FFT_N / 2 - 1, Math.max(1, Math.round(f * FFT_N / sr)));
+  }
+  return edges;
 }
 
 async function buildEnvelope(node, file) {
@@ -641,32 +673,76 @@ async function buildEnvelope(node, file) {
 
     const d = buf.getChannelData(0);
     const sr = buf.sampleRate;
-    // Split into three bands with cascaded one-pole filters: cheap, one pass
-    // each, and enough to tell a vowel from a consonant.
-    const lowB = lowPass(d, sr, 300);
-    const midB = lowPass(d, sr, 2200);
-
     const hop = Math.max(1, Math.round(sr * ENV_HOP));
     const n = Math.floor(d.length / hop);
-    const all = new Float32Array(n), lo = new Float32Array(n),
-          mid = new Float32Array(n), hi = new Float32Array(n);
-    for (let i = 0; i < n; i++) {
-      const s = i * hop, e = s + hop;
-      all[i] = rmsOf(d, s, e);
-      lo[i] = rmsOf(lowB, s, e);
-      let m = 0, h = 0;
-      for (let j = s; j < e; j++) {
-        const mv = midB[j] - lowB[j];   // 300 Hz – 2.2 kHz
-        const hv = d[j] - midB[j];      // above 2.2 kHz
-        m += mv * mv; h += hv * hv;
+
+    const all = new Float32Array(n);
+    const nb = Math.ceil(n / SPEC_STRIDE);
+    const mags = new Float32Array(nb * BANDS);  // linear for now, scaled below
+    const edges = bandEdges(sr);
+    const re = new Float32Array(FFT_N), im = new Float32Array(FFT_N);
+    const win = new Float32Array(FFT_N);        // Hann, to stop windowing splatter
+    for (let i = 0; i < FFT_N; i++) win[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (FFT_N - 1));
+
+    /* Yielded in slices. Run as one loop this pass blocks the main thread — on
+       a throttled phone it held everything up for seconds, freezing the
+       animation and pushing KINA's first word out past the gap it was supposed
+       to be filling. Now it gives the frame back every few milliseconds and the
+       ring simply picks the spectrum up when it lands. */
+    let peak = 1e-6;
+    let slice = performance.now();
+    for (let f = 0; f < nb; f++) {
+      for (let k = f * SPEC_STRIDE; k < (f + 1) * SPEC_STRIDE && k < n; k++) {
+        all[k] = rmsOf(d, k * hop, k * hop + hop);
       }
-      mid[i] = Math.sqrt(m / hop);
-      hi[i] = Math.sqrt(h / hop);
+      const s = f * SPEC_STRIDE * hop;
+      const from = Math.max(0, Math.min(d.length - FFT_N, s - (FFT_N >> 1)));
+      for (let i = 0; i < FFT_N; i++) { re[i] = (d[from + i] || 0) * win[i]; im[i] = 0; }
+      fft(re, im);
+      for (let b = 0; b < BANDS; b++) {
+        let sum = 0, count = 0;
+        for (let k = edges[b]; k <= edges[b + 1]; k++) {
+          sum += Math.sqrt(re[k] * re[k] + im[k] * im[k]);
+          count++;
+        }
+        const m = count ? sum / count : 0;
+        mags[f * BANDS + b] = m;
+        if (m > peak) peak = m;
+      }
+      if (performance.now() - slice > 8) {
+        await new Promise(r => setTimeout(r, 0));
+        slice = performance.now();
+      }
     }
-    node.env = {
-      all: normaliseBand(all), lo: normaliseBand(lo),
-      mid: normaliseBand(mid), hi: normaliseBand(hi), n
-    };
+
+    /* Smoothed across time per band, the way AnalyserNode does with its default
+       0.72 time constant. Without it the ring twitches frame to frame instead
+       of rippling, which is most of what separated the two platforms. */
+    const SMOOTH = 0.72;
+    for (let b = 0; b < BANDS; b++) {
+      let acc = mags[b];
+      for (let f = 1; f < nb; f++) {
+        const k = f * BANDS + b;
+        acc = SMOOTH * acc + (1 - SMOOTH) * mags[k];
+        mags[k] = acc;
+      }
+    }
+
+    /* To bytes on a decibel scale, which is what getByteFrequencyData gives the
+       drawing code on desktop. Linear magnitude would leave everything above
+       the vowels sitting at zero and the top of the ring dead. */
+    const bands = new Uint8Array(n * BANDS);
+    for (let i = 0; i < mags.length; i++) {
+      const db = 20 * Math.log10(Math.max(mags[i] / peak, 1e-5));
+      const u = Math.max(0, Math.min(1, (db + 72) / 72));
+      // Gamma calibrated against what the live analyser hands the same drawing
+      // code: a straight dB ramp sat about twice as hot, and the bar lengths
+      // clipped at full scale, which is what turned the ring into an even
+      // annulus instead of a wave.
+      bands[i] = Math.pow(u, 2.3) * 255;
+    }
+
+    node.env = { all: normaliseBand(all), bands, n, nb };
     // Measuring a long file can outlast the start of the line it belongs to.
     // Hand it straight to the core so the ring picks it up mid-sentence.
     if (activeVO && node.el === activeVO) activeEnv = node.env;
@@ -929,7 +1005,8 @@ async function buildEnvelope(node, file) {
       // and max-ing it made the ring hang above the voice on every falling
       // syllable — motion that looked busy but ran late.
       coreEnergy = 0.08 + envSmooth * 0.92;
-      spec = fillSpec(activeEnv.lo[i], activeEnv.mid[i], activeEnv.hi[i]);
+      const bi = Math.min(activeEnv.nb - 1, i / SPEC_STRIDE | 0);
+      spec = activeEnv.bands.subarray(bi * BANDS, (bi + 1) * BANDS);
     } else if (activeVO && !activeVO.paused && !activeVO.ended) {
       // Envelope not built yet, or the file could not be measured. Drive the
       // core from a speech-shaped curve so it still reacts while KINA talks —
@@ -941,6 +1018,8 @@ async function buildEnvelope(node, file) {
       const gap = Math.sin(t * 0.9) > 0.88 ? 0.2 : 1;    // occasional breath
       coreEnergy = Math.max(coreEnergy, (0.12 + syllable * phrase * 0.85) * gap);
     }
+
+    lastSpec = spec;
 
     const W = c.width, H = c.height;
     const cx = W / 2, cy = H / 2;
@@ -2315,6 +2394,16 @@ renderCaptureUI();
 if (IS_IOS) $('ios-sound').classList.remove('hidden');
 // Start buffering the voiceover now so the Begin tap plays instantly.
 Object.entries(VO_LINES).forEach(([k, s]) => getVONode(k, s.file));
+/* And measure it now too, on iOS, where the ring has no live analyser to fall
+   back on. Running it here rather than on the tap means the work happens while
+   the start screen is idle, instead of competing with the ignition animation
+   and the voice for the same thread. The bytes are already in cache from the
+   preload above, so it costs no extra download. */
+if (IS_IOS) {
+  Object.entries(VO_LINES).forEach(([k, s]) => {
+    if (s.file) buildEnvelope(getVONode(k, s.file), s.file);
+  });
+}
 
 /* Test seam — exposed only when served locally, so the browser test harness
    can drive the flow without a live camera. Never active on the deployed site. */
@@ -2322,6 +2411,7 @@ if (['localhost', '127.0.0.1'].includes(location.hostname)) {
   window.__scan = {
     state, ingest, runFullAnalysis, buildShareCard, warpImage, getLandmarker, showPanel,
     boot: () => ({ running: bootRunning, done: bootDone }),
+    spectrum: () => lastSpec,
     audio: () => ({
       energy: coreEnergy,
       analyser: !!coreAnalyser,
