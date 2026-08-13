@@ -119,17 +119,30 @@ const check = (n, c, x = '') => {
     for (let i = 0; i < d.length; i += 4 * 53) if (d[i + 1] > 20) lit++;
     return { ok: true, w: c.width, litFrac: lit / Math.floor(d.length / (4 * 53)) };
   });
-  check('KINA core canvas is rendering', core.ok && core.litFrac > 0.05, JSON.stringify(core));
+  // Pre-tap the core is a deliberately quiet holding pattern.
+  check('idle core renders', core.ok && core.litFrac > 0.004 && core.litFrac < 0.2, JSON.stringify(core));
   check('custom loop absent -> core still shown',
         !(await page.getAttribute('#kina-loop', 'class') || '').includes('ready'));
 
   await page.click('#btn-begin');
-  await page.waitForTimeout(3200);
+  await page.waitForTimeout(2500);
   const sfxOk = await page.evaluate(() => {
     const a = window.__scan.audio();
     return { ctx: a.ctx, energy: a.energy };
   });
   check('audio context unlocked by the tap', sfxOk.ctx === 'running', JSON.stringify(sfxOk));
+  check('boot sequence is running', await page.evaluate(() => window.__scan.boot().running));
+  const bootLit = await page.evaluate(() => {
+    const c = document.getElementById('kina-core');
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    let lit = 0;
+    for (let i = 0; i < d.length; i += 4 * 53) if (d[i + 1] > 20) lit++;
+    return lit / Math.floor(d.length / (4 * 53));
+  });
+  check('boot renders far brighter than idle', bootLit > core.litFrac * 3, `idle=${core.litFrac.toFixed(3)} boot=${bootLit.toFixed(3)}`);
+  // The scored sequence owns the screen for 15s; the voiceover follows it.
+  await page.waitForTimeout(14500);
+  check('boot sequence completed', await page.evaluate(() => window.__scan.boot().done));
   const au = await page.evaluate(() => window.__scan.audio());
   console.log('     audio:', JSON.stringify(au));
   check('voiceover audio is driving the core', au.energy > 0.02, JSON.stringify(au));
