@@ -142,6 +142,10 @@ const check = (n, c, x = '') => {
   check('boot renders far brighter than idle', bootLit > core.litFrac * 3, `idle=${core.litFrac.toFixed(3)} boot=${bootLit.toFixed(3)}`);
   check('core reached steady state fast (<2.5s)',
         await page.evaluate(() => window.__scan.boot().done));
+  // The system-loading bed holds the gap before KINA speaks.
+  check('loading state shown before the voiceover', await page.evaluate(() =>
+    document.getElementById('kina-status').textContent.includes('LOADING')));
+  await page.waitForTimeout(2400);
   const au = await page.evaluate(() => window.__scan.audio());
   console.log('     audio:', JSON.stringify(au));
   check('voiceover audio is driving the core', au.energy > 0.02, JSON.stringify(au));

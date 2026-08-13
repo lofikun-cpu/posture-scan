@@ -263,6 +263,26 @@ const SFX = {
     tone(65, 98, 0.9, { type: 'sine', gain: 0.14 });          // sub underneath
     noise(0.9, 120, 800, 0.05);
   },
+  /* System-loading bed for the gap between the tap and KINA speaking.
+     Written to the measured character of the supplied reference: spectral
+     centroid ~2.4 kHz, zero energy below 300 Hz, sparse with 37% near-silence.
+     So it's all shimmer and air — deliberately no sub, unlike the ambient bed. */
+  systemLoading: () => {
+    // rising shimmer, the spine of the cue
+    noise(2.6, 700, 6200, 0.055);
+    noise(1.4, 3000, 1200, 0.030);                 // counter-sweep for movement
+    // spin-up tones, high and thin
+    tone(880, 1760, 2.2, { type: 'sine', gain: 0.045 });
+    tone(1320, 2640, 2.2, { type: 'sine', gain: 0.022, delay: 0.25 });
+    // sparse telemetry, scattered rather than rhythmic
+    [0.15, 0.52, 0.78, 1.24, 1.61, 2.05, 2.42].forEach((d, i) =>
+      tone(1600 + (i % 3) * 620, 0, 0.045,
+           { type: 'triangle', gain: 0.035, delay: d }));
+    // resolve: a two-note chime as the core settles
+    tone(2093, 2093, 0.5, { type: 'sine', gain: 0.05, delay: 2.75 });
+    tone(3136, 3136, 0.6, { type: 'sine', gain: 0.038, delay: 2.92 });
+  },
+
   // boot cues
   telemetry: () => tone(880 + Math.random() * 900, 0, 0.035, { type: 'square', gain: 0.03 }),
   swoosh:  () => noise(0.3, 2400, 200, 0.07),
@@ -1380,7 +1400,8 @@ const hideError = () => { $('err-box').style.display = 'none'; };
 const showWarn = (msg) => { const b = $('warn-box'); b.textContent = 'ⓘ ' + msg; b.style.display = 'block'; };
 const hideWarn = () => { $('warn-box').style.display = 'none'; };
 
-const BOOT_SEQ_MS = 1500; // must match BOOT_MS inside the core renderer
+const BOOT_SEQ_MS = 1500;  // must match BOOT_MS inside the core renderer
+const LOADING_MS = 3600;   // system-loading bed runs ~3.4s; hold for it to resolve
 
 /* ---------- intro briefing ----------
    Audio needs a user gesture on mobile, so the briefing starts on tap.
@@ -1399,9 +1420,12 @@ async function runBriefing() {
   bootStart = performance.now();
   bootRunning = true;
   sfx('powerUp', 1);
+  sfx('systemLoading', 0.8);        // AI spinning up, under the ignition
+  $('kina-status').textContent = '◈ SYSTEM LOADING';
   getLandmarker().catch(() => {});  // model downloads behind the briefing
 
-  await sleep(BOOT_SEQ_MS + 350);   // let the core settle before KINA speaks
+  // Hold for the loading bed to resolve before KINA speaks over it.
+  await sleep(LOADING_MS);
   if (!briefingRan) return;         // skipped out during ignition
   startBed();
   $('kina-status').textContent = '◈ BRIEFING IN PROGRESS';
