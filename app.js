@@ -370,13 +370,38 @@ function getVONode(key, file) {
   if (!c) return;
   const ctx = c.getContext('2d');
   let t = 0;
+  /* Bloom is what separates the reference from crisp vector line-work: every
+     element there is blown out and glowing. Rendering the frame again through
+     a downscaled blur with additive compositing is the cheap way to get it —
+     quarter resolution keeps it affordable on a phone. */
+  const glow = document.createElement('canvas');
+  const gctx = glow.getContext('2d');
+  const bloomOK = typeof gctx.filter === 'string';
+
   const fit = () => {
     const r = c.getBoundingClientRect();
     const dpr = Math.min(2, devicePixelRatio || 1);
     c.width = Math.max(1, r.width * dpr);
     c.height = Math.max(1, r.height * dpr);
+    glow.width = Math.max(1, Math.round(c.width / 4));
+    glow.height = Math.max(1, Math.round(c.height / 4));
   };
   fit(); addEventListener('resize', fit);
+
+  function applyBloom(strength = 1) {
+    if (!bloomOK || !glow.width) return;
+    gctx.clearRect(0, 0, glow.width, glow.height);
+    gctx.drawImage(c, 0, 0, glow.width, glow.height);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.55 * strength;
+    ctx.filter = 'blur(5px)';
+    ctx.drawImage(glow, 0, 0, c.width, c.height);
+    ctx.globalAlpha = 0.30 * strength;
+    ctx.filter = 'blur(14px)';       // wider, softer halo
+    ctx.drawImage(glow, 0, 0, c.width, c.height);
+    ctx.restore();
+  }
 
   const BLUE = '36,221,221';
   const HOT = '168,245,245';
@@ -858,6 +883,7 @@ function getVONode(key, file) {
       gl.addColorStop(0, `rgba(${BLUE},${0.10 + Math.sin(t) * 0.03})`);
       gl.addColorStop(1, `rgba(${BLUE},0)`);
       ctx.fillStyle = gl; ctx.fillRect(0, 0, W, H);
+      applyBloom(0.7);
       requestAnimationFrame(frame);
       return;
     }
@@ -868,6 +894,7 @@ function getVONode(key, file) {
       if (bt >= BOOT_MS / 1000) { bootRunning = false; bootDone = true; }
       else {
         drawBoot(bt, W, H, cx, cy);
+        applyBloom(1.15);            // the montage is the most blown-out part
         requestAnimationFrame(frame);
         return;
       }
@@ -913,6 +940,27 @@ function getVONode(key, file) {
         ctx.moveTo(cx + Math.cos(a) * sr * 0.72, cy + Math.sin(a) * sr * 0.72);
         ctx.lineTo(cx + Math.cos(a) * sr, cy + Math.sin(a) * sr);
         ctx.stroke();
+      }
+    }
+
+    // ---- honeycomb backdrop, faint, drifting (present across the reference)
+    {
+      const hs = Math.min(W, H) * 0.085;
+      const drift = (t * 6) % (hs * 1.5);
+      ctx.strokeStyle = `rgba(${BLUE},0.055)`;
+      ctx.lineWidth = Math.max(1, W * 0.0015);
+      for (let row = -1; row * hs * 1.5 - drift < H + hs; row++) {
+        for (let col = -1; col * hs * 1.73 < W + hs; col++) {
+          const hx = col * hs * 1.73 + (row % 2 ? hs * 0.87 : 0);
+          const hy = row * hs * 1.5 - drift;
+          ctx.beginPath();
+          for (let v = 0; v < 6; v++) {
+            const a = v * Math.PI / 3;
+            const px = hx + Math.cos(a) * hs * 0.5, py = hy + Math.sin(a) * hs * 0.5;
+            v ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+          }
+          ctx.closePath(); ctx.stroke();
+        }
       }
     }
 
@@ -1237,6 +1285,7 @@ function getVONode(key, file) {
         ctx.stroke();
       });
 
+    applyBloom(0.72);   // lighter than the montage; the steady HUD stays legible
     coreEnergy *= 0.94; // decays unless refreshed by speech
     requestAnimationFrame(frame);
   })();
