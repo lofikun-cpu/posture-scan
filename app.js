@@ -110,15 +110,26 @@ let audioCtx = null;
 /* Audio must be unlocked from inside the tap handler itself — creating or
    resuming an AudioContext asynchronously afterwards leaves it suspended on
    iOS. Call this synchronously from the Begin gesture. */
+const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
 function unlockAudio() {
   try {
+    // iOS 16.4+: declaring playback lets audio ignore the ringer switch.
+    // Set before the context exists, so it applies from the start.
+    if (navigator.audioSession) {
+      try { navigator.audioSession.type = 'playback'; } catch (e) {}
+    }
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
     audioCtx = audioCtx || new AC();
     if (audioCtx.state === 'suspended') audioCtx.resume();
-    // iOS 16.4+: spoken content should ignore the ringer switch.
-    if (navigator.audioSession) {
-      try { navigator.audioSession.type = 'playback'; } catch (e) {}
+    // Older iOS ignores audioSession. Starting a silent buffer inside the
+    // gesture is the long-standing way to get its output running at all.
+    if (IS_IOS) {
+      const b = audioCtx.createBuffer(1, 1, 22050);
+      const s = audioCtx.createBufferSource();
+      s.buffer = b; s.connect(audioCtx.destination); s.start(0);
     }
     startBed(); // the drone runs from the first tap onward
   } catch (e) { audioCtx = null; }
@@ -354,7 +365,8 @@ function getVONode(key, file) {
 
   const fit = () => {
     const r = c.getBoundingClientRect();
-    const dpr = Math.min(2, devicePixelRatio || 1);
+    const small = Math.min(innerWidth, innerHeight) < 900;
+    const dpr = Math.min(small ? 1.5 : 2, devicePixelRatio || 1);
     c.width = Math.max(1, r.width * dpr);
     c.height = Math.max(1, r.height * dpr);
     glow.width = Math.max(1, Math.round(c.width / 4));
@@ -362,19 +374,44 @@ function getVONode(key, file) {
   };
   fit(); addEventListener('resize', fit);
 
+  /* Blur only ever runs at quarter resolution. Filtering the full-size draw
+     instead costs ~16x more pixels, and canvas blur is largely unaccelerated
+     on iOS Safari — that alone was enough to stall the frame rate on a phone.
+     Drawing the small blurred buffer back up is smooth for free. */
   function applyBloom(strength = 1) {
-    if (!bloomOK || !glow.width) return;
-    gctx.clearRect(0, 0, glow.width, glow.height);
+    if (!bloomOK || !glow.width || !bloomOn) return;
+    gctx.globalCompositeOperation = 'copy';
+    gctx.filter = 'blur(3px)';
     gctx.drawImage(c, 0, 0, glow.width, glow.height);
+    gctx.filter = 'none';
+    gctx.globalCompositeOperation = 'source-over';
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     ctx.globalAlpha = 0.55 * strength;
-    ctx.filter = 'blur(5px)';
     ctx.drawImage(glow, 0, 0, c.width, c.height);
-    ctx.globalAlpha = 0.30 * strength;
-    ctx.filter = 'blur(14px)';       // wider, softer halo
-    ctx.drawImage(glow, 0, 0, c.width, c.height);
+    ctx.globalAlpha = 0.28 * strength;
+    // second, wider pass: same buffer drawn oversized reads as a soft halo
+    const o = c.width * 0.012;
+    ctx.drawImage(glow, -o, -o, c.width + o * 2, c.height + o * 2);
     ctx.restore();
+  }
+
+  /* If the device can't hold a reasonable frame rate, drop bloom rather than
+     let the whole interface stutter. Checked over a rolling window so a single
+     slow frame doesn't trip it. */
+  let bloomOn = true;
+  let frameAcc = 0, frameCount = 0, lastFrameAt = 0;
+  function trackFrame() {
+    const now = performance.now();
+    if (lastFrameAt) {
+      frameAcc += now - lastFrameAt;
+      if (++frameCount >= 45) {
+        const avg = frameAcc / frameCount;
+        if (bloomOn && avg > 30) bloomOn = false;   // sustained sub-33fps
+        frameAcc = 0; frameCount = 0;
+      }
+    }
+    lastFrameAt = now;
   }
 
   const BLUE = '36,221,221';
@@ -906,6 +943,7 @@ function getVONode(key, file) {
       });
 
     applyBloom(0.72);   // lighter than the montage; the steady HUD stays legible
+    trackFrame();
     coreEnergy *= 0.94; // decays unless refreshed by speech
     requestAnimationFrame(frame);
   })();
@@ -1414,6 +1452,7 @@ async function runBriefing() {
   unlockAudio(); // must happen inside the tap, before anything async
 
   $('btn-begin').classList.add('hidden');
+  $('ios-sound').classList.add('hidden');
   $('btn-skip-vo').classList.remove('hidden');
   $('kina-status').textContent = '';
 
@@ -1543,7 +1582,7 @@ async function ingest(img) {
 
   let det = null, err = null, settled = false;
   getLandmarker()
-    .then(lm => { det = lm.detect(img); })
+    .then(lm => { det = lm.detect(detectionSource(img)); })
     .catch(e => { err = e; })
     .finally(() => { settled = true; });
 
@@ -1614,6 +1653,24 @@ async function ingest(img) {
     if (q.warn) showWarn(q.warn);
     await runFullAnalysis();
   }
+}
+
+/* Phone cameras produce 12 MP images; handing one straight to the detector
+   costs a large texture upload for no benefit, since the model works from a
+   small square internally. Landmarks come back normalised, so a downscaled
+   copy gives identical geometry far faster. */
+const DETECT_MAX = 1280;
+let detCanvas = null;
+function detectionSource(img) {
+  if (img.width <= DETECT_MAX && img.height <= DETECT_MAX) return img;
+  const s = DETECT_MAX / Math.max(img.width, img.height);
+  detCanvas = detCanvas || document.createElement('canvas');
+  detCanvas.width = Math.round(img.width * s);
+  detCanvas.height = Math.round(img.height * s);
+  const c = detCanvas.getContext('2d');
+  c.clearRect(0, 0, detCanvas.width, detCanvas.height);
+  c.drawImage(img, 0, 0, detCanvas.width, detCanvas.height);
+  return detCanvas;
 }
 
 function releaseMasks(det) {
@@ -1879,6 +1936,7 @@ function updateCta() {
 
 updateCta();
 renderCaptureUI();
+if (IS_IOS) $('ios-sound').classList.remove('hidden');
 // Start buffering the voiceover now so the Begin tap plays instantly.
 Object.entries(VO_LINES).forEach(([k, s]) => getVONode(k, s.file));
 

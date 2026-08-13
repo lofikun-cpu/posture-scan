@@ -158,6 +158,12 @@
     justify-content: flex-end;
     padding-bottom: 8px;
   }
+  #ios-sound {
+    font-family: monospace; font-size: 12px; letter-spacing: 0.5px;
+    color: var(--orange); text-align: center;
+    border: 1px solid rgba(255,179,71,0.45); border-radius: 6px;
+    background: rgba(3,7,13,0.72); padding: 10px 12px; margin-bottom: 10px;
+  }
   #intro-overlay .btn {
     backdrop-filter: blur(3px);
     background: linear-gradient(180deg, rgba(36,221,221,0.22), rgba(3,7,13,0.55));
@@ -398,6 +404,9 @@
          the stage itself lives outside #app so it can fill the viewport. -->
     <div id="intro-overlay">
       <div id="vo-caption" aria-live="polite"></div>
+      <!-- Shown on iOS only: the hardware ringer switch mutes web audio
+           regardless of volume, and it is the usual cause of a silent scan. -->
+      <div id="ios-sound" class="hidden">🔈 Flip the side switch off silent — it mutes KINA</div>
       <button class="btn" id="btn-begin">▶ Begin Briefing</button>
       <button class="btn hidden" id="btn-start">◈ I'm Ready — Start Scan</button>
       <button class="btn secondary hidden" id="btn-skip-vo">▸ Skip briefing</button>
