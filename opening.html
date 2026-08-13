@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KINA·OS — Opening Sequence</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; background: #000; overflow: hidden; }
+  body {
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Consolas', 'SF Mono', monospace; color: #24dddd;
+  }
+  #wrap { position: relative; width: 100vw; height: 100vh; }
+  canvas { display: block; width: 100%; height: 100%; }
+
+  #ui {
+    position: absolute; inset: 0; display: flex;
+    align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.72); z-index: 3;
+  }
+  #ui.hidden { display: none; }
+  button {
+    background: linear-gradient(180deg, rgba(36,221,221,0.22), rgba(0,0,0,0.6));
+    border: 1px solid #24dddd; color: #24dddd;
+    font: inherit; font-size: 15px; letter-spacing: 4px;
+    padding: 18px 40px; border-radius: 6px; cursor: pointer;
+    text-transform: uppercase;
+  }
+  button:hover { background: rgba(36,221,221,0.32); box-shadow: 0 0 30px rgba(36,221,221,0.4); }
+
+  #hud {
+    position: absolute; left: 14px; bottom: 12px; z-index: 2;
+    font-size: 11px; letter-spacing: 2px; color: rgba(36,221,221,0.55);
+    pointer-events: none;
+  }
+  #tools {
+    position: absolute; right: 14px; bottom: 10px; z-index: 4;
+    display: flex; gap: 8px;
+  }
+  #tools button { font-size: 10px; letter-spacing: 2px; padding: 8px 12px; }
+  /* Portrait phones: rotate the stage so the ultrawide layout still reads. */
+  @media (max-aspect-ratio: 1/1) {
+    #wrap {
+      width: 100vh; height: 100vw;
+      transform: rotate(90deg);
+      position: absolute; top: 50%; left: 50%;
+      margin-top: -50vw; margin-left: -50vh;
+    }
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="c"></canvas>
+  <div id="hud">KINA·OS // OPENING SEQUENCE <span id="clock">0.0s</span></div>
+  <div id="tools">
+    <button id="replay">↺ Replay</button>
+    <button id="mute">Sound: on</button>
+  </div>
+  <div id="ui"><button id="play">▶ Play Sequence</button></div>
+</div>
+
+<script>
+/* ============================================================
+   KINA·OS opening sequence — standalone, 15 s, three-monitor
+   ultrawide layout. Built to the shot-by-shot timing sheet.
+   Self-contained: no dependencies, nothing loaded from the app.
+   ============================================================ */
+
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+const glow = document.createElement('canvas');
+const gctx = glow.getContext('2d');
+
+const CYAN = '36,221,221', HOT = '190,250,250', GREEN = '90,255,140',
+      GOLD = '241,220,42', RED = '237,77,66', WHITE = '255,255,255',
+      BLUE = '84,119,197', ORANGE = '255,150,50';
+
+let W = 0, H = 0, DPR = 1;
+function fit() {
+  const r = cv.getBoundingClientRect();
+  DPR = Math.min(2, devicePixelRatio || 1);
+  W = cv.width = Math.max(1, Math.round(r.width * DPR));
+  H = cv.height = Math.max(1, Math.round(r.height * DPR));
+  glow.width = Math.max(1, W >> 2);
+  glow.height = Math.max(1, H >> 2);
+}
+addEventListener('resize', fit);
+
+/* ---------- three-monitor geometry ---------- */
+const BEZEL = 0.012;                     // gap between screens, fraction of width
+function panel(i) {                      // 0 = left, 1 = centre, 2 = right
+  const gap = W * BEZEL;
+  const pw = (W - gap * 2) / 3;
+  return { x: i * (pw + gap), y: 0, w: pw, h: H, cx: i * (pw + gap) + pw / 2, cy: H / 2 };
+}
+function clipPanel(i, fn) {
+  const p = panel(i);
+  ctx.save(); ctx.beginPath(); ctx.rect(p.x, p.y, p.w, p.h); ctx.clip();
+  fn(p); ctx.restore();
+}
+function eachPanel(fn) { for (let i = 0; i < 3; i++) clipPanel(i, (p) => fn(p, i)); }
+
+/* ---------- helpers ---------- */
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const seg = (t, a, z) => clamp((t - a) / (z - a), 0, 1);
+const ease = (x) => 1 - Math.pow(1 - x, 3);
+const R = (n) => `rgba(${n})`;
+
+function ring(cx, cy, r, from, to, w, col, alpha) {
+  ctx.beginPath(); ctx.arc(cx, cy, r, from, to);
+  ctx.strokeStyle = `rgba(${col},${alpha})`; ctx.lineWidth = w; ctx.stroke();
+}
+function label(text, x, y, size, col, alpha, align = 'left') {
+  ctx.font = `${size}px Consolas, monospace`;
+  ctx.textAlign = align; ctx.textBaseline = 'middle';
+  ctx.fillStyle = `rgba(${col},${alpha})`;
+  ctx.fillText(text, x, y);
+}
+/** Soft cloudy wash — used for the blurry backgrounds. */
+function wash(p, t, cols, n = 5, scale = 0.7) {
+  for (let i = 0; i < n; i++) {
+    const px = p.x + p.w * (0.5 + Math.sin(t * 0.6 + i * 2.1) * 0.42);
+    const py = p.cy + p.h * Math.sin(t * 0.45 + i * 1.7) * 0.38;
+    const rr = p.w * scale * (0.35 + 0.25 * Math.sin(t * 0.8 + i));
+    const g = ctx.createRadialGradient(px, py, 0, px, py, rr);
+    const col = cols[i % cols.length];
+    g.addColorStop(0, `rgba(${col},0.30)`);
+    g.addColorStop(0.55, `rgba(${col},0.10)`);
+    g.addColorStop(1, `rgba(${col},0)`);
+    ctx.fillStyle = g;
+    ctx.fillRect(p.x, p.y, p.w, p.h);
+  }
+}
+function bloom(strength) {
+  if (typeof gctx.filter !== 'string') return;
+  gctx.clearRect(0, 0, glow.width, glow.height);
+  gctx.drawImage(cv, 0, 0, glow.width, glow.height);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = 0.5 * strength; ctx.filter = 'blur(5px)';
+  ctx.drawImage(glow, 0, 0, W, H);
+  ctx.globalAlpha = 0.28 * strength; ctx.filter = 'blur(15px)';
+  ctx.drawImage(glow, 0, 0, W, H);
+  ctx.restore();
+}
+function bezels() {
+  ctx.fillStyle = '#000';
+  const gap = W * BEZEL, pw = (W - gap * 2) / 3;
+  ctx.fillRect(pw, 0, gap, H);
+  ctx.fillRect(pw * 2 + gap, 0, gap, H);
+}
+
+/* ============================================================
+   SHOTS
+   ============================================================ */
+
+/* 0:00–0:01 — retina scan / spy analysis / geographic */
+function shot1(t) {
+  const u = W * 0.012;                                   // type scale
+  clipPanel(0, (p) => {
+    wash(p, t, [GREEN, '40,160,90']);
+    label('RETINA SCAN', p.x + p.w * 0.08, p.cy - p.h * 0.06, u * 1.5, GOLD, 0.95);
+    label('BIOMETRIC LOCK', p.x + p.w * 0.08, p.cy + p.h * 0.02, u * 0.85, WHITE, 0.5);
+  });
+  clipPanel(1, (p) => {
+    // three concentric circles rotating about a centre dot
+    const rr = Math.min(p.w, p.h) * 0.20;
+    const cols = [RED, GOLD, '140,255,150'];
+    for (let i = 0; i < 3; i++) {
+      const a = t * (1.6 + i * 0.9) * (i % 2 ? -1 : 1);
+      ring(p.cx, p.cy, rr * (0.55 + i * 0.30), a, a + 4.5,
+           Math.max(1.5, rr * 0.05), cols[i], 0.9);
+    }
+    ctx.fillStyle = `rgba(${WHITE},0.95)`;
+    ctx.beginPath(); ctx.arc(p.cx, p.cy, Math.max(2, rr * 0.07), 0, 7); ctx.fill();
+    label('ENABLING TRUCHOUSE MODE', p.cx, p.cy - rr * 1.75, u * 0.8, GOLD, 0.85, 'center');
+    label('SPY ANALYSIS', p.cx, p.cy + rr * 1.75, u * 0.8, GREEN, 0.85, 'center');
+    label('SCANNING FOR USER DEVICES', p.cx, p.cy + rr * 2.15, u * 0.75, CYAN, 0.8, 'center');
+  });
+  clipPanel(2, (p) => {
+    wash(p, t + 3, [BLUE, '40,180,160']);
+    // faint map outlines
+    ctx.strokeStyle = `rgba(${CYAN},0.22)`;
+    ctx.lineWidth = Math.max(1, W * 0.0012);
+    for (let i = 0; i < 4; i++) {
+      ctx.beginPath();
+      for (let x = 0; x <= p.w; x += 14) {
+        const y = p.cy + Math.sin(x * 0.008 + i * 1.9) * p.h * 0.13
+                       + Math.sin(x * 0.021 + i) * p.h * 0.06 + (i - 1.5) * p.h * 0.14;
+        x ? ctx.lineTo(p.x + x, y) : ctx.moveTo(p.x + x, y);
+      }
+      ctx.stroke();
+    }
+    label('GEOGRAPHIC', p.x + p.w * 0.92, p.cy - p.h * 0.06, u * 1.5, GOLD, 0.95, 'right');
+  });
+}
+
+/* 0:01–0:02 — hexagons, then a hard cut to a blue orthogonal grid */
+function shot2(t) {
+  const half = t < 1.5;
+  if (half) {
+    const s = Math.min(W, H) * 0.055;
+    ctx.strokeStyle = `rgba(${GREEN},0.75)`;
+    ctx.lineWidth = Math.max(1, W * 0.0016);
+    for (let row = -1; row * s * 1.5 < H + s; row++) {
+      for (let col = -1; col * s * 1.73 < W + s; col++) {
+        const hx = col * s * 1.73 + (row % 2 ? s * 0.87 : 0), hy = row * s * 1.5;
+        ctx.beginPath();
+        for (let v = 0; v < 6; v++) {
+          const a = v * Math.PI / 3;
+          const px = hx + Math.cos(a) * s * 0.5, py = hy + Math.sin(a) * s * 0.5;
+          v ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+        }
+        ctx.closePath(); ctx.stroke();
+        // thin connecting lines between centres
+        ctx.beginPath();
+        ctx.moveTo(hx, hy); ctx.lineTo(hx + s * 1.73, hy);
+        ctx.strokeStyle = `rgba(${GREEN},0.22)`; ctx.stroke();
+        ctx.strokeStyle = `rgba(${GREEN},0.75)`;
+      }
+    }
+  } else {
+    const g = Math.min(W, H) * 0.05;
+    ctx.strokeStyle = `rgba(${BLUE},0.85)`;
+    ctx.lineWidth = Math.max(1, W * 0.0018);
+    for (let x = 0; x <= W; x += g) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+    for (let y = 0; y <= H; y += g) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+  }
+  // rapid flashing across the whole cut
+  if (Math.sin(t * 60) > 0.55) {
+    ctx.fillStyle = `rgba(${WHITE},0.10)`;
+    ctx.fillRect(0, 0, W, H);
+  }
+}
+
+/* 0:02–0:03 — layered multi-colour ring expanding past the edges */
+function shot3(t) {
+  const k = seg(t, 2, 3);
+  const p = panel(1);
+  const rr = Math.min(p.w, p.h) * 0.06 + ease(k) * W * 0.55;
+  const cols = [RED, GOLD, BLUE, GREEN, WHITE];
+  cols.forEach((col, i) => {
+    ring(p.cx, p.cy, rr * (1 - i * 0.07), 0, Math.PI * 2,
+         Math.max(2, Math.min(p.w, p.h) * 0.035), col, 0.9 - k * 0.2);
+  });
+}
+
+/* 0:03–0:05 — amorphous cloud, no geometric edges */
+function shot4(t) {
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  eachPanel((p, i) => wash(p, t * 1.5 + i * 2, [GREEN, CYAN, '60,255,200'], 6, 1.0));
+  ctx.restore();
+}
+
+/* 0:05–0:08 — white grid, loading readout, then a bar across all screens */
+function shot5(t) {
+  const g = Math.min(W, H) * 0.045;
+  ctx.strokeStyle = `rgba(${WHITE},0.13)`;
+  ctx.lineWidth = 1;
+  for (let x = 0; x <= W; x += g) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+  for (let y = 0; y <= H; y += g) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+
+  const p = panel(1);
+  const spread = seg(t, 6.2, 6.6);                        // abrupt expansion
+  const bw = p.w * 0.52 + ease(spread) * (W - p.w * 0.52);
+  const bh = H * 0.16;
+  const bx = p.cx - bw / 2, by = p.cy - bh / 2;
+
+  ctx.fillStyle = 'rgba(0,0,0,0.85)';
+  ctx.fillRect(bx, by, bw, bh);
+  ctx.strokeStyle = `rgba(${WHITE},0.9)`;
+  ctx.lineWidth = Math.max(1, W * 0.0018);
+  ctx.strokeRect(bx, by, bw, bh);
+
+  if (spread > 0.02) {
+    // repeating green triangles and intersecting lines inside the bar
+    ctx.save();
+    ctx.beginPath(); ctx.rect(bx, by, bw, bh); ctx.clip();
+    const step = bh * 0.8;
+    ctx.strokeStyle = `rgba(${GREEN},0.85)`;
+    ctx.lineWidth = Math.max(1, W * 0.0014);
+    for (let x = bx; x < bx + bw; x += step) {
+      ctx.beginPath();
+      ctx.moveTo(x, by + bh); ctx.lineTo(x + step / 2, by); ctx.lineTo(x + step, by + bh);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(x, by); ctx.lineTo(x + step, by + bh);
+      ctx.moveTo(x + step, by); ctx.lineTo(x, by + bh);
+      ctx.strokeStyle = `rgba(${GREEN},0.35)`; ctx.stroke();
+      ctx.strokeStyle = `rgba(${GREEN},0.85)`;
+    }
+    ctx.restore();
+  } else {
+    const pct = Math.round(seg(t, 5.05, 6.15) * 100);
+    label('loading…', p.cx, p.cy - bh * 0.14, W * 0.011, WHITE, 0.9, 'center');
+    label(pct + '%', p.cx, p.cy + bh * 0.20, W * 0.019, WHITE, 0.95, 'center');
+  }
+}
+
+/* 0:08–0:10 — flowing jagged strands, left edge to right edge */
+function shot6(t) {
+  const k = seg(t, 8, 8.5);
+  const n = 22;
+  for (let i = 0; i < n; i++) {
+    const base = H * (0.08 + (i / n) * 0.84);
+    const amp = H * 0.055 * (0.4 + Math.sin(i * 1.9) * 0.6);
+    ctx.strokeStyle = i % 4 === 0
+      ? `rgba(${HOT},${0.75 * k})` : `rgba(${i % 2 ? CYAN : GREEN},${0.5 * k})`;
+    ctx.lineWidth = Math.max(1, W * (i % 4 === 0 ? 0.0022 : 0.0013));
+    ctx.beginPath();
+    for (let x = -20; x <= W + 20; x += 9) {
+      // jagged rather than smooth: two frequencies plus a saw component
+      const ph = x * 0.010 + t * 4.5 + i * 0.7;
+      const y = base + Math.sin(ph) * amp + Math.sin(ph * 2.7) * amp * 0.45
+                     + ((x * 0.35 + t * 220 + i * 40) % 26 - 13) * 0.35;
+      x <= -20 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+}
+
+/* 0:11–0:12 — green cross, dark red squares fading up */
+function shot8(t) {
+  const p = panel(1);
+  const k = seg(t, 11.05, 11.35);
+  const c = Math.min(p.w, p.h) * 0.035;
+  ctx.strokeStyle = `rgba(${GREEN},${0.95 * k})`;
+  ctx.lineWidth = Math.max(1.5, W * 0.0022);
+  ctx.beginPath();
+  ctx.moveTo(p.cx - c, p.cy); ctx.lineTo(p.cx - c * 0.25, p.cy);
+  ctx.moveTo(p.cx + c * 0.25, p.cy); ctx.lineTo(p.cx + c, p.cy);
+  ctx.moveTo(p.cx, p.cy - c); ctx.lineTo(p.cx, p.cy - c * 0.25);
+  ctx.moveTo(p.cx, p.cy + c * 0.25); ctx.lineTo(p.cx, p.cy + c);
+  ctx.stroke();
+
+  const gk = seg(t, 11.25, 12);
+  if (gk > 0) {
+    clipPanel(1, () => {
+      const cell = Math.min(p.w, p.h) * (0.11 + gk * 0.03);   // squares grow slightly
+      ctx.strokeStyle = `rgba(${RED},${0.55 * gk})`;
+      ctx.lineWidth = Math.max(1, W * 0.002);
+      for (let gy = -2; gy < 4; gy++) {
+        for (let gx = -3; gx < 4; gx++) {
+          ctx.strokeRect(p.cx + gx * cell - cell / 2, p.cy + gy * cell - cell / 2, cell, cell);
+        }
+      }
+    });
+  }
+}
+
+/* 0:12–0:13 — dense horizontal static */
+function shot9() {
+  const lh = Math.max(2, H * 0.006);
+  for (let y = 0; y < H; y += lh) {
+    const v = 30 + Math.random() * 200;
+    ctx.fillStyle = `rgba(${v},${v},${v},${0.5 + Math.random() * 0.5})`;
+    ctx.fillRect(0, y, W, lh * (0.5 + Math.random() * 0.6));
+  }
+}
+
+/* 0:13–0:15 — settled: dashed cyan ring, orange inner ring, side panels */
+function shot10(t) {
+  const k = seg(t, 12.95, 13.3);
+  clipPanel(1, (p) => {
+    const rr = Math.min(p.w, p.h) * 0.28;
+    ctx.setLineDash([rr * 0.20, rr * 0.11]);
+    ring(p.cx, p.cy, rr, 0, Math.PI * 2, Math.max(3, rr * 0.10), CYAN, 0.9 * k);
+    ctx.setLineDash([rr * 0.13, rr * 0.09]);
+    const a = t * 1.5;                                     // clockwise
+    ring(p.cx, p.cy, rr * 0.52, a, a + Math.PI * 2, Math.max(2, rr * 0.06), ORANGE, 0.95 * k);
+    ctx.setLineDash([]);
+  });
+  for (const i of [0, 2]) {
+    clipPanel(i, (p) => {
+      ctx.strokeStyle = `rgba(${WHITE},${0.22 * k})`;
+      ctx.lineWidth = 1;
+      for (let y = p.h * 0.1; y < p.h * 0.9; y += p.h * 0.035) {
+        ctx.beginPath(); ctx.moveTo(p.x + p.w * 0.06, y); ctx.lineTo(p.x + p.w * 0.94, y); ctx.stroke();
+      }
+      const s = Math.min(p.w, p.h) * 0.30;
+      ctx.strokeStyle = `rgba(${CYAN},${0.85 * k})`;
+      ctx.lineWidth = Math.max(1.5, W * 0.0018);
+      ctx.strokeRect(p.cx - s / 2, p.cy - s / 2, s, s);
+      const inner = s * 0.42;
+      ctx.fillStyle = `rgba(${CYAN},${0.30 * k})`;
+      ctx.fillRect(p.cx - inner / 2, p.cy - inner / 2, inner, inner);
+      ring(p.cx, p.cy, inner * 0.30, 0, Math.PI * 2, Math.max(1.5, W * 0.0016), WHITE, 0.9 * k);
+    });
+  }
+}
+
+/* ============================================================
+   AUDIO — action bed through the montage, silence at the reset
+   ============================================================ */
+let actx = null, bed = null, soundOn = true;
+const timers = [];
+function unlock() {
+  if (actx || !soundOn) return;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (AC) { actx = new AC(); if (actx.state === 'suspended') actx.resume(); }
+}
+function tone(f0, f1, dur, { type = 'sine', gain = 0.1, delay = 0 } = {}) {
+  if (!actx || !soundOn) return;
+  const t0 = actx.currentTime + delay;
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = type; o.frequency.setValueAtTime(f0, t0);
+  if (f1 && f1 !== f0) o.frequency.exponentialRampToValueAtTime(Math.max(1, f1), t0 + dur);
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(gain, t0 + Math.min(0.02, dur * 0.2));
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  o.connect(g); g.connect(actx.destination); o.start(t0); o.stop(t0 + dur + 0.02);
+}
+function noise(dur, f0, f1, gain = 0.08) {
+  if (!actx || !soundOn) return;
+  const t0 = actx.currentTime, n = Math.ceil(actx.sampleRate * dur);
+  const buf = actx.createBuffer(1, n, actx.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+  const src = actx.createBufferSource(); src.buffer = buf;
+  const bp = actx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 1.1;
+  bp.frequency.setValueAtTime(f0, t0);
+  bp.frequency.exponentialRampToValueAtTime(f1, t0 + dur);
+  const g = actx.createGain();
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(gain, t0 + dur * 0.25);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  src.connect(bp); bp.connect(g); g.connect(actx.destination);
+  src.start(t0); src.stop(t0 + dur);
+}
+function startBed() {
+  if (!actx || bed || !soundOn) return;
+  const t0 = actx.currentTime, out = actx.createGain();
+  out.gain.setValueAtTime(0.0001, t0);
+  out.gain.exponentialRampToValueAtTime(0.11, t0 + 0.4);
+  out.connect(actx.destination);
+  const drone = actx.createOscillator(); drone.type = 'sawtooth'; drone.frequency.value = 41.2;
+  const lp = actx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 190;
+  drone.connect(lp); lp.connect(out); drone.start(t0);
+  const pulse = actx.createOscillator(); pulse.type = 'square'; pulse.frequency.value = 82.4;
+  const pg = actx.createGain(); pg.gain.value = 0;
+  pulse.connect(pg); pg.connect(out); pulse.start(t0);
+  for (let i = 0; i < 70; i++) {
+    const at = t0 + i * 0.15;
+    pg.gain.setValueAtTime(0.3, at);
+    pg.gain.exponentialRampToValueAtTime(0.001, at + 0.11);
+  }
+  bed = { out, drone, pulse };
+}
+function stopBed() {
+  if (!bed) return;
+  const t0 = actx.currentTime;
+  try {
+    bed.out.gain.cancelScheduledValues(t0);
+    bed.out.gain.setValueAtTime(Math.max(0.0001, bed.out.gain.value), t0);
+    bed.out.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.05);
+    bed.drone.stop(t0 + 0.1); bed.pulse.stop(t0 + 0.1);
+  } catch (e) {}
+  bed = null;
+}
+function schedule() {
+  const at = (s, fn) => timers.push(setTimeout(fn, s * 1000));
+  startBed();
+  for (let s = 0.2; s < 9.6; s += 0.3)
+    at(s + Math.random() * 0.1, () => tone(700 + Math.random() * 1100, 0, 0.03, { type: 'square', gain: 0.025 }));
+  [1.0, 2.0, 3.0, 5.0, 6.3, 8.0].forEach(s => at(s, () => noise(0.32, 2200, 220, 0.07)));
+  at(2.0, () => { tone(50, 220, 0.9, { gain: 0.2 }); noise(0.8, 120, 900, 0.06); });
+  at(10.0, () => stopBed());                       // hard cut to silence
+  at(11.1, () => { tone(1400, 1400, 0.06, { gain: 0.09 });
+                   tone(1400, 1400, 0.06, { gain: 0.07, delay: 0.18 }); });
+  at(12.0, () => { noise(0.5, 1400, 5200, 0.2); tone(60, 40, 0.3, { type: 'square', gain: 0.1 }); });
+  at(13.1, () => tone(110, 165, 1.2, { gain: 0.12 }));
+}
+function clearAudio() { timers.splice(0).forEach(clearTimeout); stopBed(); }
+
+/* ============================================================
+   TIMELINE
+   ============================================================ */
+const DUR = 15;
+let start = 0, running = false;
+
+function draw(t) {
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+
+  if (t < 1)        shot1(t);
+  else if (t < 2)   shot2(t);
+  else if (t < 3)   shot3(t);
+  else if (t < 5)   shot4(t);
+  else if (t < 8)   shot5(t);
+  else if (t < 10)  shot6(t);
+  else if (t < 11)  { /* full black, no movement */ }
+  else if (t < 12)  shot8(t);
+  else if (t < 13)  shot9();
+  else              shot10(t);
+
+  // The static shot is already blown out; bloom everything else.
+  if (t < 12 || t >= 13) bloom(t < 10 ? 1.15 : 0.85);
+  bezels();
+  document.getElementById('clock').textContent = t.toFixed(1) + 's';
+}
+
+function frame() {
+  if (!running) return;
+  const t = (performance.now() - start) / 1000;
+  if (t >= DUR) {
+    running = false;
+    draw(DUR - 0.01);
+    document.getElementById('ui').classList.remove('hidden');
+    document.getElementById('play').textContent = '↺ Play again';
+    return;
+  }
+  draw(t);
+  requestAnimationFrame(frame);
+}
+
+function play() {
+  fit();
+  clearAudio();
+  unlock();
+  document.getElementById('ui').classList.add('hidden');
+  start = performance.now();
+  running = true;
+  schedule();
+  requestAnimationFrame(frame);
+}
+
+document.getElementById('play').addEventListener('click', play);
+document.getElementById('replay').addEventListener('click', play);
+document.getElementById('mute').addEventListener('click', (e) => {
+  soundOn = !soundOn;
+  e.target.textContent = 'Sound: ' + (soundOn ? 'on' : 'off');
+  if (!soundOn) clearAudio();
+});
+
+window.draw = draw;            // lets a test harness grab exact frames
+fit();
+draw(0);                       // hold the first shot behind the play button
+</script>
+</body>
+</html>
