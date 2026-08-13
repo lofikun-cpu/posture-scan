@@ -51,6 +51,18 @@ const skip = (section) => {
     return Math.abs(r.width - innerWidth) < 2 && Math.abs(r.height - innerHeight) < 2;
   }));
   check('body flagged as intro', await page.evaluate(() => document.body.classList.contains('intro')));
+  // The intro is one screen by design. Note the limit of this check: Playwright
+  // has no browser toolbars, so it cannot reproduce the iOS case where 100vh is
+  // taller than the visible area — the dvh rule in the CSS is what covers that.
+  // This guards the simpler regression of the content itself outgrowing the page.
+  const fit = await page.evaluate(() => {
+    const de = document.documentElement;
+    const btn = document.getElementById('btn-begin').getBoundingClientRect();
+    return { over: de.scrollHeight - de.clientHeight, btnBottom: btn.bottom, vis: de.clientHeight };
+  });
+  check('intro does not scroll', fit.over <= 0, JSON.stringify(fit));
+  check('the one control sits inside the viewport',
+        fit.btnBottom <= fit.vis, JSON.stringify(fit));
 
   const hasFixture = await page.evaluate(async (src) => {
     try { const r = await fetch(src, { method: 'HEAD' }); return r.ok; } catch (e) { return false; }
@@ -148,8 +160,21 @@ const skip = (section) => {
   check('custom loop absent -> core still shown',
         !(await page.getAttribute('#kina-loop', 'class') || '').includes('ready'));
 
+  const tapAt = Date.now();
   await page.click('#btn-begin');
-  await page.waitForTimeout(2500);
+  // The loading cue holds this gap. It used to run a second longer than it
+  // needed to, which read on the phone as the app having stalled.
+  await page.waitForTimeout(1800);
+  check('loading state shown before the voiceover', await page.evaluate(() =>
+    document.getElementById('kina-status').textContent.includes('LOADING')));
+  await page.waitForFunction(() => {
+    const a = window.__scan.audio();
+    return a.t !== null && a.t > 0.05;
+  }, { timeout: 15000 });
+  const startGap = (Date.now() - tapAt) / 1000;
+  console.log(`     KINA starts ${startGap.toFixed(2)}s after the tap`);
+  check('KINA comes in without an awkward pause (<3.2s)', startGap < 3.2, `${startGap.toFixed(2)}s`);
+  await page.waitForTimeout(700);
   const sfxOk = await page.evaluate(() => {
     const a = window.__scan.audio();
     return { ctx: a.ctx, energy: a.energy };
@@ -166,10 +191,7 @@ const skip = (section) => {
   check('boot renders far brighter than idle', bootLit > core.litFrac * 3, `idle=${core.litFrac.toFixed(3)} boot=${bootLit.toFixed(3)}`);
   check('core reached steady state fast (<2.5s)',
         await page.evaluate(() => window.__scan.boot().done));
-  // The system-loading bed holds the gap before KINA speaks.
-  check('loading state shown before the voiceover', await page.evaluate(() =>
-    document.getElementById('kina-status').textContent.includes('LOADING')));
-  await page.waitForTimeout(2400);
+  await page.waitForTimeout(900);
   const au = await page.evaluate(() => window.__scan.audio());
   console.log('     audio:', JSON.stringify(au));
   check('voiceover audio is driving the core', au.energy > 0.02, JSON.stringify(au));

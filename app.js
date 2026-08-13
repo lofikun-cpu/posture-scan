@@ -241,7 +241,7 @@ function silentWavURL() {
    rather than exact. */
 const CUE_SECONDS = {
   tap: 0.2, blip: 0.2, powerUp: 1.4, whoosh: 0.8, lock: 0.4, reject: 0.7,
-  scan: 1.0, reveal: 1.4, systemLoading: 3.8, telemetry: 0.2, swoosh: 0.45,
+  scan: 1.0, reveal: 1.4, systemLoading: 2.6, telemetry: 0.2, swoosh: 0.45,
   target: 0.4, staticZap: 0.6
 };
 const cueURL = {};          // name → object URL of the rendered WAV
@@ -471,18 +471,19 @@ const SFX = {
      So it's all shimmer and air — deliberately no sub, unlike the ambient bed. */
   systemLoading: () => {
     // rising shimmer, the spine of the cue
-    noise(2.6, 700, 6200, 0.055);
-    noise(1.4, 3000, 1200, 0.030);                 // counter-sweep for movement
+    noise(1.9, 700, 6200, 0.055);
+    noise(1.0, 3000, 1200, 0.030);                 // counter-sweep for movement
     // spin-up tones, high and thin
-    tone(880, 1760, 2.2, { type: 'sine', gain: 0.045 });
-    tone(1320, 2640, 2.2, { type: 'sine', gain: 0.022, delay: 0.25 });
+    tone(880, 1760, 1.6, { type: 'sine', gain: 0.045 });
+    tone(1320, 2640, 1.6, { type: 'sine', gain: 0.022, delay: 0.2 });
     // sparse telemetry, scattered rather than rhythmic
-    [0.15, 0.52, 0.78, 1.24, 1.61, 2.05, 2.42].forEach((d, i) =>
+    [0.12, 0.40, 0.62, 0.95, 1.25, 1.55].forEach((d, i) =>
       tone(1600 + (i % 3) * 620, 0, 0.045,
            { type: 'triangle', gain: 0.035, delay: d }));
-    // resolve: a two-note chime as the core settles
-    tone(2093, 2093, 0.5, { type: 'sine', gain: 0.05, delay: 2.75 });
-    tone(3136, 3136, 0.6, { type: 'sine', gain: 0.038, delay: 2.92 });
+    // resolve: a two-note chime as the core settles, timed to land just as
+    // KINA takes over — the silence between them was the awkward part
+    tone(2093, 2093, 0.45, { type: 'sine', gain: 0.05, delay: 1.75 });
+    tone(3136, 3136, 0.55, { type: 'sine', gain: 0.038, delay: 1.9 });
   },
 
   // boot cues
@@ -709,9 +710,9 @@ async function buildEnvelope(node, file) {
     gctx.globalCompositeOperation = 'source-over';
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    ctx.globalAlpha = 0.55 * strength;
+    ctx.globalAlpha = 0.72 * strength;
     ctx.drawImage(glow, 0, 0, c.width, c.height);
-    ctx.globalAlpha = 0.28 * strength;
+    ctx.globalAlpha = 0.38 * strength;
     // second, wider pass: same buffer drawn oversized reads as a soft halo
     const o = c.width * 0.012;
     ctx.drawImage(glow, -o, -o, c.width + o * 2, c.height + o * 2);
@@ -949,13 +950,17 @@ async function buildEnvelope(node, file) {
       ctx.fillStyle = '#01050a';
       ctx.fillRect(0, 0, W, H);
       const M = Math.min(W, H);
-      arc(cx, cy, M * 0.2, t * 0.25, t * 0.25 + 2.2, Math.max(1, M * 0.004), 0.28);
-      arc(cx, cy, M * 0.16, -t * 0.18, -t * 0.18 + 1.4, Math.max(1, M * 0.003), 0.2);
-      const gl = ctx.createRadialGradient(cx, cy, 0, cx, cy, M * 0.3);
-      gl.addColorStop(0, `rgba(${BLUE},${0.10 + Math.sin(t) * 0.03})`);
+      arc(cx, cy, M * 0.24, -t * 0.12, -t * 0.12 + 0.9, Math.max(1, M * 0.003), 0.34);
+      arc(cx, cy, M * 0.2, t * 0.25, t * 0.25 + 2.2, Math.max(1, M * 0.006), 0.7);
+      arc(cx, cy, M * 0.16, -t * 0.18, -t * 0.18 + 1.4, Math.max(1, M * 0.005), 0.52);
+      // a slow pulse at the centre, so the screen reads as powered rather than
+      // asleep — this is the first thing anyone sees
+      const gl = ctx.createRadialGradient(cx, cy, 0, cx, cy, M * 0.38);
+      gl.addColorStop(0, `rgba(${HOT},${0.26 + Math.sin(t * 1.1) * 0.07})`);
+      gl.addColorStop(0.35, `rgba(${BLUE},${0.13 + Math.sin(t * 1.1) * 0.03})`);
       gl.addColorStop(1, `rgba(${BLUE},0)`);
       ctx.fillStyle = gl; ctx.fillRect(0, 0, W, H);
-      applyBloom(0.7);
+      applyBloom(1.15);
       requestAnimationFrame(frame);
       return;
     }
@@ -971,7 +976,7 @@ async function buildEnvelope(node, file) {
     const Rsteady = Math.min(W, H) * 0.150 * (1 + Math.sin(t * 2.1) * 0.012 + coreEnergy * 0.05);
     // The assembly falls in from oversize as it locks on.
     const R = Rsteady * (1 + (1 - ph(b, 0.28, 0.72)) * 0.9);
-    const energy = 0.28 + coreEnergy * 0.72;
+    const energy = 0.34 + coreEnergy * 0.72;
 
     ctx.clearRect(0, 0, W, H);
 
@@ -1031,7 +1036,7 @@ async function buildEnvelope(node, file) {
 
     // ---- ambient glow behind the assembly
     const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 4);
-    g.addColorStop(0, `rgba(${BLUE},${(0.16 + coreEnergy * 0.16) * ph(b, 0.05, 0.4)})`);
+    g.addColorStop(0, `rgba(${BLUE},${(0.22 + coreEnergy * 0.20) * ph(b, 0.05, 0.4)})`);
     g.addColorStop(0.4, `rgba(${BLUE},${0.05 * ph(b, 0.05, 0.4)})`);
     g.addColorStop(1, `rgba(${BLUE},0)`);
     ctx.fillStyle = g;
@@ -1106,7 +1111,7 @@ async function buildEnvelope(node, file) {
           const a = (i / BARS) * Math.PI * 2 + t * 0.09;
           const amp = amplitude(i, a);
           const len = R * (0.22 + amp * 0.62 * energy) * specIn;
-          const alpha = (pass === 0 ? 0.10 + amp * 0.18 : 0.30 + amp * 0.55) * specIn;
+          const alpha = (pass === 0 ? 0.14 + amp * 0.24 : 0.42 + amp * 0.58) * specIn;
           ctx.beginPath();
           ctx.strokeStyle = `rgba(${amp > 0.72 ? HOT : BLUE},${alpha})`;
           ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0);
@@ -1289,7 +1294,8 @@ async function buildEnvelope(node, file) {
         ctx.stroke();
       });
 
-    applyBloom(0.72);   // lighter than the montage; the steady HUD stays legible
+    applyBloom(0.95);   // lifted for phone screens in daylight, where the
+                        // original reading was closer to charcoal than cyan
     trackFrame();
     coreEnergy *= 0.94; // decays unless refreshed by speech
     requestAnimationFrame(frame);
@@ -1801,7 +1807,11 @@ const showWarn = (msg) => { const b = $('warn-box'); b.textContent = 'ⓘ ' + ms
 const hideWarn = () => { $('warn-box').style.display = 'none'; };
 
 const BOOT_SEQ_MS = 1500;  // must match BOOT_MS inside the core renderer
-const LOADING_MS = 3600;   // system-loading bed runs ~3.4s; hold for it to resolve
+/* The handoff. The ignition animation is done at BOOT_SEQ_MS and the loading
+   cue resolves at ~2.45s, so KINA comes in on the tail of its chime rather
+   than after a beat of silence. Both were longer; the gap between them read as
+   the app having stalled. */
+const LOADING_MS = 2350;
 
 /* ---------- intro briefing ----------
    Audio needs a user gesture on mobile, so the briefing starts on tap.

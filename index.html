@@ -36,15 +36,28 @@
     overflow-x: hidden;
     -webkit-tap-highlight-color: transparent;
   }
-  #bg-canvas { position: fixed; inset: 0; z-index: 0; width: 100vw; height: 100vh; }
+  #bg-canvas {
+    position: fixed; inset: 0; z-index: 0;
+    width: 100vw; height: 100vh; height: 100dvh;
+  }
 
+  /* On iOS, 100vh is the viewport with the Safari toolbars hidden — taller
+     than what you can actually see — so a 100vh page pushes its own bottom
+     under the toolbar and the whole thing scrolls. dvh tracks the visible
+     area, and the vh line above it stays as the fallback. */
   #app {
     position: relative; z-index: 1;
     max-width: 560px; margin: 0 auto;
     min-height: 100vh;
+    min-height: 100dvh;
     display: flex; flex-direction: column;
-    padding: 16px 16px 32px;
+    padding: 16px 16px calc(20px + env(safe-area-inset-bottom));
   }
+
+  /* The intro is one screen by design: the animation, and one control on it.
+     Nothing there should ever scroll. */
+  body.intro { overflow: hidden; }
+  body.intro #app { height: 100dvh; }
 
   header {
     display: flex; align-items: center; justify-content: space-between;
@@ -182,12 +195,25 @@
       radial-gradient(ellipse at center, transparent 45%, rgba(4,8,15,0.75) 100%);
   }
   #kina-status {
-    position: absolute; left: 10px; bottom: 9px; z-index: 4;
+    position: absolute; left: 10px; z-index: 4;
+    bottom: calc(9px + env(safe-area-inset-bottom));
     font-family: monospace; font-size: 9.5px; letter-spacing: 2px;
     color: var(--cyan); text-shadow: 0 0 8px var(--cyan-dim);
   }
   #kina-stage.speaking #kina-status { animation: pulseDim 1.1s ease-in-out infinite; }
   @keyframes pulseDim { 50% { opacity: 0.35; } }
+
+  /* Short screens — most phones once the browser chrome is showing. Trim the
+     furniture rather than let the button drift under the toolbar. */
+  @media (max-height: 720px) {
+    #app { padding: 10px 14px calc(12px + env(safe-area-inset-bottom)); }
+    header { padding: 4px 4px 8px; }
+    .logo { font-size: 13px; letter-spacing: 2.5px; }
+    #mute-btn { font-size: 10px; padding: 5px 8px; }
+    #ios-sound { font-size: 11px; padding: 8px 10px; margin-bottom: 8px; }
+    #intro-overlay .btn { padding: 13px 16px; font-size: 14px; }
+    #vo-caption { font-size: 15px; padding: 10px 12px; }
+  }
 
   /* ---------- voiceover captions ---------- */
   #vo-caption {
