@@ -107,6 +107,7 @@ let bootDone = false;
 
 let coreEnergy = 0;       // 0 idle, 1 speaking — drives glow and bar height
 let lastSpec = null;      // the bin array the bars drew from, for the test seam
+let lastAmps = null;      // and the bar heights it produced
 let coreAnalyser = null;  // live FFT of the voiceover, when Web Audio is available
 let audioCtx = null;
 
@@ -242,7 +243,7 @@ function silentWavURL() {
    rather than exact. */
 const CUE_SECONDS = {
   tap: 0.2, blip: 0.2, powerUp: 1.4, whoosh: 0.8, lock: 0.4, reject: 0.7,
-  scan: 1.0, reveal: 1.4, systemLoading: 2.6, telemetry: 0.2, swoosh: 0.45,
+  scan: 1.0, reveal: 1.4, systemLoading: 2.2, telemetry: 0.2, swoosh: 0.45,
   target: 0.4, staticZap: 0.6
 };
 const cueURL = {};          // name → object URL of the rendered WAV
@@ -472,19 +473,19 @@ const SFX = {
      So it's all shimmer and air — deliberately no sub, unlike the ambient bed. */
   systemLoading: () => {
     // rising shimmer, the spine of the cue
-    noise(1.9, 700, 6200, 0.055);
-    noise(1.0, 3000, 1200, 0.030);                 // counter-sweep for movement
+    noise(1.5, 700, 6200, 0.055);
+    noise(0.8, 3000, 1200, 0.030);                 // counter-sweep for movement
     // spin-up tones, high and thin
-    tone(880, 1760, 1.6, { type: 'sine', gain: 0.045 });
-    tone(1320, 2640, 1.6, { type: 'sine', gain: 0.022, delay: 0.2 });
+    tone(880, 1760, 1.3, { type: 'sine', gain: 0.045 });
+    tone(1320, 2640, 1.3, { type: 'sine', gain: 0.022, delay: 0.15 });
     // sparse telemetry, scattered rather than rhythmic
-    [0.12, 0.40, 0.62, 0.95, 1.25, 1.55].forEach((d, i) =>
+    [0.10, 0.32, 0.50, 0.76, 1.0, 1.24].forEach((d, i) =>
       tone(1600 + (i % 3) * 620, 0, 0.045,
            { type: 'triangle', gain: 0.035, delay: d }));
     // resolve: a two-note chime as the core settles, timed to land just as
     // KINA takes over — the silence between them was the awkward part
-    tone(2093, 2093, 0.45, { type: 'sine', gain: 0.05, delay: 1.75 });
-    tone(3136, 3136, 0.55, { type: 'sine', gain: 0.038, delay: 1.9 });
+    tone(2093, 2093, 0.45, { type: 'sine', gain: 0.05, delay: 1.35 });
+    tone(3136, 3136, 0.55, { type: 'sine', gain: 0.038, delay: 1.5 });
   },
 
   // boot cues
@@ -608,10 +609,23 @@ function normaliseBand(band) {
    on desktop hands the same code 128 independent bins, which is what makes it
    ripple. So the offline pass computes a real spectrum too — same drawing code,
    same character, on both. */
-const BANDS = 128;          // matches the live analyser's bin count
-const FFT_N = 1024;         // ~46 ms at 22.05 kHz — the resolution is what
-                            // gives the ring its texture; 512 smeared it flat
-const SPEC_STRIDE = 2;      // spectrum every other frame; smoothing hides the rest
+/* Built to be the same instrument as the live analyser rather than something
+   that resembles it: AnalyserNode with fftSize 256 at 44.1 kHz gives 128 linear
+   bins from a 5.8 ms window, smoothed 0.72, reported in decibels between -100
+   and -30. Matching the window length matters as much as the bin count — a
+   longer window overlaps its neighbours, so consecutive frames come out
+   correlated and the ring moves less even when its shape is right. */
+const FFT_N = 256;
+const BANDS = FFT_N / 2;    // one band per bin, linear, exactly as the analyser
+const SPEC_SR = 44100;      // so the bins cover the same frequencies
+const SMOOTH = 0.72;        // AnalyserNode's default smoothingTimeConstant
+const MIN_DB = -100, MAX_DB = -30;   // AnalyserNode's defaults
+/* One spectrum per animation frame. At every other frame the ring still had
+   the right SHAPE — as wavy as desktop, measurably — but it moved 2.5x less
+   per frame, because each value was held for two frames and the smoothing
+   below then ran at half rate, doubling its effective time constant. The
+   result read as a stiff ring rather than a rippling one. */
+const SPEC_STRIDE = 1;
 
 /** Iterative in-place radix-2 FFT. `im` starts zeroed for real input. */
 function fft(re, im) {
@@ -644,16 +658,6 @@ function fft(re, im) {
   }
 }
 
-/** Log-spaced band edges, in FFT bins — speech spreads evenly that way. */
-function bandEdges(sr) {
-  const lo = 80, hi = Math.min(8000, sr / 2 - 100);
-  const edges = new Int32Array(BANDS + 1);
-  for (let i = 0; i <= BANDS; i++) {
-    const f = lo * Math.pow(hi / lo, i / BANDS);
-    edges[i] = Math.min(FFT_N / 2 - 1, Math.max(1, Math.round(f * FFT_N / sr)));
-  }
-  return edges;
-}
 
 async function buildEnvelope(node, file) {
   if (!node || node.envBuilt) return;
@@ -664,8 +668,7 @@ async function buildEnvelope(node, file) {
     const res = await fetch(file);
     if (!res.ok) return;
     const raw = await res.arrayBuffer();
-    // 22.05 kHz is ample for a loudness curve and halves the decode work.
-    const ctx = new OAC(1, 1024, 22050);
+    const ctx = new OAC(1, 1024, SPEC_SR);
     const buf = await new Promise((ok, no) => {
       const p = ctx.decodeAudioData(raw, ok, no);   // callback form for older WebKit
       if (p && p.then) p.then(ok).catch(no);
@@ -678,8 +681,8 @@ async function buildEnvelope(node, file) {
 
     const all = new Float32Array(n);
     const nb = Math.ceil(n / SPEC_STRIDE);
-    const mags = new Float32Array(nb * BANDS);  // linear for now, scaled below
-    const edges = bandEdges(sr);
+    const bands = new Uint8Array(nb * BANDS);
+    const prev = new Float32Array(BANDS);       // smoothing state, per bin
     const re = new Float32Array(FFT_N), im = new Float32Array(FFT_N);
     const win = new Float32Array(FFT_N);        // Hann, to stop windowing splatter
     for (let i = 0; i < FFT_N; i++) win[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (FFT_N - 1));
@@ -689,57 +692,33 @@ async function buildEnvelope(node, file) {
        animation and pushing KINA's first word out past the gap it was supposed
        to be filling. Now it gives the frame back every few milliseconds and the
        ring simply picks the spectrum up when it lands. */
-    let peak = 1e-6;
+    /* Yielded in slices. Run as one loop this pass blocks the main thread — on
+       a throttled phone it held everything up for seconds, freezing the
+       animation and pushing KINA's first word out past the gap it was supposed
+       to be filling. Now it gives the frame back every few milliseconds and the
+       ring simply picks the spectrum up when it lands. */
     let slice = performance.now();
     for (let f = 0; f < nb; f++) {
       for (let k = f * SPEC_STRIDE; k < (f + 1) * SPEC_STRIDE && k < n; k++) {
         all[k] = rmsOf(d, k * hop, k * hop + hop);
       }
       const s = f * SPEC_STRIDE * hop;
-      const from = Math.max(0, Math.min(d.length - FFT_N, s - (FFT_N >> 1)));
+      const from = Math.max(0, Math.min(Math.max(0, d.length - FFT_N), s));
       for (let i = 0; i < FFT_N; i++) { re[i] = (d[from + i] || 0) * win[i]; im[i] = 0; }
       fft(re, im);
       for (let b = 0; b < BANDS; b++) {
-        let sum = 0, count = 0;
-        for (let k = edges[b]; k <= edges[b + 1]; k++) {
-          sum += Math.sqrt(re[k] * re[k] + im[k] * im[k]);
-          count++;
-        }
-        const m = count ? sum / count : 0;
-        mags[f * BANDS + b] = m;
-        if (m > peak) peak = m;
+        // magnitude scaled by the transform size, as Web Audio reports it
+        const m = Math.sqrt(re[b] * re[b] + im[b] * im[b]) / FFT_N;
+        const sm = f ? SMOOTH * prev[b] + (1 - SMOOTH) * m : m;
+        prev[b] = sm;
+        const db = 20 * Math.log10(Math.max(sm, 1e-9));
+        const u = (db - MIN_DB) / (MAX_DB - MIN_DB);
+        bands[f * BANDS + b] = Math.max(0, Math.min(255, u * 255));
       }
       if (performance.now() - slice > 8) {
         await new Promise(r => setTimeout(r, 0));
         slice = performance.now();
       }
-    }
-
-    /* Smoothed across time per band, the way AnalyserNode does with its default
-       0.72 time constant. Without it the ring twitches frame to frame instead
-       of rippling, which is most of what separated the two platforms. */
-    const SMOOTH = 0.72;
-    for (let b = 0; b < BANDS; b++) {
-      let acc = mags[b];
-      for (let f = 1; f < nb; f++) {
-        const k = f * BANDS + b;
-        acc = SMOOTH * acc + (1 - SMOOTH) * mags[k];
-        mags[k] = acc;
-      }
-    }
-
-    /* To bytes on a decibel scale, which is what getByteFrequencyData gives the
-       drawing code on desktop. Linear magnitude would leave everything above
-       the vowels sitting at zero and the top of the ring dead. */
-    const bands = new Uint8Array(n * BANDS);
-    for (let i = 0; i < mags.length; i++) {
-      const db = 20 * Math.log10(Math.max(mags[i] / peak, 1e-5));
-      const u = Math.max(0, Math.min(1, (db + 72) / 72));
-      // Gamma calibrated against what the live analyser hands the same drawing
-      // code: a straight dB ramp sat about twice as hot, and the bar lengths
-      // clipped at full scale, which is what turned the ring into an even
-      // annulus instead of a wave.
-      bands[i] = Math.pow(u, 2.3) * 255;
     }
 
     node.env = { all: normaliseBand(all), bands, n, nb };
@@ -1186,9 +1165,11 @@ async function buildEnvelope(node, file) {
       for (const pass of [0, 1]) {
         ctx.lineWidth = pass === 0 ? Math.max(2.5, R * 0.055) : Math.max(1, R * 0.022);
         ctx.lineCap = 'butt';
+        if (pass === 1 && (!lastAmps || lastAmps.length !== BARS)) lastAmps = new Float32Array(BARS);
         for (let i = 0; i < BARS; i++) {
           const a = (i / BARS) * Math.PI * 2 + t * 0.09;
           const amp = amplitude(i, a);
+          if (pass === 1) lastAmps[i] = amp;
           const len = R * (0.22 + amp * 0.62 * energy) * specIn;
           const alpha = (pass === 0 ? 0.14 + amp * 0.24 : 0.42 + amp * 0.58) * specIn;
           ctx.beginPath();
@@ -1716,6 +1697,29 @@ function getLandmarker() {
   return landmarkerPromise;
 }
 
+/* The first inference is the expensive one: the graph is built and its shaders
+   compiled on the way through, which measured seconds — seconds that landed
+   between the user's upload and KINA answering. Spending it up front on a blank
+   frame fixes that, but WHERE matters. Done as part of loading the model it
+   blocked the briefing and pushed KINA's first word out to 4.3s. It runs on the
+   capture screen instead: nothing is animating there, the user is reading the
+   pose guide, and it is comfortably before any photo arrives. */
+let detectorWarm = false;
+function warmDetector() {
+  if (detectorWarm) return;
+  detectorWarm = true;
+  getLandmarker().then((lm) => {
+    setTimeout(() => {
+      try {
+        const cv = document.createElement('canvas');
+        cv.width = 256; cv.height = 256;
+        cv.getContext('2d').fillRect(0, 0, 256, 256);
+        releaseMasks(lm.detect(cv));
+      } catch (e) { /* the first real scan will just pay the cost instead */ }
+    }, 0);
+  }).catch(() => { detectorWarm = false; });
+}
+
 /* ============================================================
    RENDERING — skeleton overlay + scan sweep
    ============================================================ */
@@ -1890,7 +1894,7 @@ const BOOT_SEQ_MS = 1500;  // must match BOOT_MS inside the core renderer
    cue resolves at ~2.45s, so KINA comes in on the tail of its chime rather
    than after a beat of silence. Both were longer; the gap between them read as
    the app having stalled. */
-const LOADING_MS = 2350;
+const LOADING_MS = 1750;
 
 /* ---------- intro briefing ----------
    Audio needs a user gesture on mobile, so the briefing starts on tap.
@@ -1943,7 +1947,7 @@ $('btn-start').addEventListener('click', () => {
   unlockAudio(); // covers users who skip the briefing entirely
   stopVO();
   sfx('whoosh', 0.6);
-  getLandmarker().catch(() => {});
+  warmDetector();
   state.want = 'front';
   renderCaptureUI();
   showPanel('panel-capture');
@@ -2041,13 +2045,22 @@ async function ingest(img) {
     .catch(e => { err = e; })
     .finally(() => { settled = true; });
 
+  /* The sweep used to run a flat two seconds whether or not there was anything
+     left to wait for — so once the model was warm, every photo bought a fixed
+     two seconds of nothing before KINA said a word. It now runs full length
+     only while detection is still outstanding, and closes a beat after the
+     result lands. The floor stops it flashing past on a fast device. */
   const t0 = performance.now();
-  const SWEEP_MS = 2000, TIMEOUT_MS = 30000;
+  const SWEEP_MS = 2000, SWEEP_MIN = 850, SETTLE_TAIL = 260, TIMEOUT_MS = 30000;
   const statuses = ['CALIBRATING SENSORS…', 'MAPPING SKELETAL NODES…', 'TRACING BODY OUTLINE…', 'MEASURING JOINT VECTORS…'];
   await new Promise(res => {
+    let dur = SWEEP_MS;
     (function frame() {
       const el = performance.now() - t0;
-      const pr = Math.min(1, el / SWEEP_MS);
+      // Shorten the remaining sweep once there is nothing left to wait for,
+      // rather than jumping — the progress ramp stays smooth either way.
+      if (settled) dur = Math.min(dur, Math.max(SWEEP_MIN, el + SETTLE_TAIL));
+      const pr = Math.min(1, el / dur);
       const lms = det && det.landmarks && det.landmarks[0];
       if (pr < 1) {
         $('scan-status').textContent = statuses[Math.min(statuses.length - 1, Math.floor(pr * statuses.length))];
@@ -2101,7 +2114,7 @@ async function ingest(img) {
     renderCaptureUI();
     $('scan-status').textContent = 'FRONTAL VIEW LOCKED ✓';
     playVO('side');
-    await sleep(900);
+    await sleep(450);
     showPanel('panel-capture');
     if (q.warn) showWarn(q.warn);
   } else {
@@ -2411,7 +2424,9 @@ if (['localhost', '127.0.0.1'].includes(location.hostname)) {
   window.__scan = {
     state, ingest, runFullAnalysis, buildShareCard, warpImage, getLandmarker, showPanel,
     boot: () => ({ running: bootRunning, done: bootDone }),
+    warmDetector,
     spectrum: () => lastSpec,
+    amps: () => lastAmps,
     audio: () => ({
       energy: coreEnergy,
       analyser: !!coreAnalyser,

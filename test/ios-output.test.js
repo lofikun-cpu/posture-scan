@@ -43,7 +43,9 @@ const UA = {
     await p.goto('http://localhost:8899/index.html', { waitUntil: 'domcontentloaded' });
     await p.waitForTimeout(700);
     await p.click('#btn-begin');
-    await p.waitForTimeout(1800);
+    // Sampled inside the loading gap: the cue hands the stream back to the
+    // voice at the end of it, so a later sample sees it already stopped.
+    await p.waitForTimeout(1100);
 
     const early = await p.evaluate(() => window.__scan.audio());
     const streams = await p.evaluate(() =>

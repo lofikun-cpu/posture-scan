@@ -164,7 +164,7 @@ const skip = (section) => {
   await page.click('#btn-begin');
   // The loading cue holds this gap. It used to run a second longer than it
   // needed to, which read on the phone as the app having stalled.
-  await page.waitForTimeout(1800);
+  await page.waitForTimeout(1100);
   check('loading state shown before the voiceover', await page.evaluate(() =>
     document.getElementById('kina-status').textContent.includes('LOADING')));
   await page.waitForFunction(() => {
@@ -173,7 +173,7 @@ const skip = (section) => {
   }, { timeout: 15000 });
   const startGap = (Date.now() - tapAt) / 1000;
   console.log(`     KINA starts ${startGap.toFixed(2)}s after the tap`);
-  check('KINA comes in without an awkward pause (<3.2s)', startGap < 3.2, `${startGap.toFixed(2)}s`);
+  check('KINA comes in without an awkward pause (<2.6s)', startGap < 2.6, `${startGap.toFixed(2)}s`);
   await page.waitForTimeout(700);
   const sfxOk = await page.evaluate(() => {
     const a = window.__scan.audio();
@@ -188,7 +188,10 @@ const skip = (section) => {
     for (let i = 0; i < d.length; i += 4 * 53) if (d[i + 1] > 20) lit++;
     return lit / Math.floor(d.length / (4 * 53));
   });
-  check('boot renders far brighter than idle', bootLit > core.litFrac * 3, `idle=${core.litFrac.toFixed(3)} boot=${bootLit.toFixed(3)}`);
+  // Idle was lifted deliberately, so the gap is narrower than it was; ignition
+  // still has to be an event rather than a nudge.
+  check('boot renders far brighter than idle', bootLit > core.litFrac * 2.2,
+        `idle=${core.litFrac.toFixed(3)} boot=${bootLit.toFixed(3)}`);
   check('core reached steady state fast (<2.5s)',
         await page.evaluate(() => window.__scan.boot().done));
   await page.waitForTimeout(900);
@@ -303,6 +306,37 @@ const skip = (section) => {
   check('front thumb reset', (await page.textContent('#thumb-front')).includes('PENDING'));
   check('back to front step', (await page.getAttribute('#dot-front', 'class')).includes('current'));
   }
+
+  console.log('\n── Scan sweep closes when detection lands');
+  /* Needs no photograph: what is being measured is how long the sweep holds on
+     AFTER the detector has answered, and a blank frame answers (with no human)
+     just as definitively as a good one. It used to hold a flat two seconds
+     either way, which is dead time between the upload and KINA speaking. */
+  const sweep = await page.evaluate(async () => {
+    window.__scan.warmDetector();                 // as the capture screen does
+    await window.__scan.getLandmarker();
+    await new Promise(r => setTimeout(r, 2500));  // let the warm-up land
+    const cv = document.createElement('canvas');
+    cv.width = 600; cv.height = 900;
+    const c2 = cv.getContext('2d');
+    c2.fillStyle = '#888'; c2.fillRect(0, 0, 600, 900);
+    const img = new Image();
+    await new Promise(r => { img.onload = r; img.src = cv.toDataURL(); });
+    const once = async () => {
+      window.__scan.state.want = 'front';
+      const t0 = performance.now();
+      await window.__scan.ingest(img);
+      return performance.now() - t0;
+    };
+    return { first: await once(), second: await once() };
+  });
+  console.log(`     sweep held ${(sweep.first / 1000).toFixed(2)}s then ` +
+              `${(sweep.second / 1000).toFixed(2)}s on an instant answer`);
+  check('sweep closes soon after the detector answers (<1.4s)', sweep.second < 1400, `${Math.round(sweep.second)}ms`);
+  check('sweep still reads as a scan, not a flash (>0.7s)', sweep.second > 700, `${Math.round(sweep.second)}ms`);
+  // The warm-up during the briefing is what should make these two alike.
+  check('the first scan is not much slower than the next', sweep.first < sweep.second + 900,
+        `${Math.round(sweep.first)}ms then ${Math.round(sweep.second)}ms`);
 
   console.log('\n── Share card');
   const card = await page.evaluate(() => {
