@@ -69,6 +69,11 @@
     text-shadow: 0 0 12px var(--cyan-dim);
   }
   .logo b { color: #fff; }
+  /* The wordmark is 23 monospace characters; on a narrow phone it wraps to two
+     lines and pushes the whole header down. Sized off width, not height. */
+  @media (max-width: 430px) {
+    .logo { font-size: 13px; letter-spacing: 2px; }
+  }
   #mute-btn {
     background: none; border: 1px solid var(--cyan-dim); color: var(--cyan);
     font-family: monospace; font-size: 11px; letter-spacing: 1px;
@@ -355,39 +360,48 @@
   .subscore .lbl { font-family: monospace; font-size: 9px; letter-spacing: 2px; color: #6da8bd; }
   .subscore .val { font-family: monospace; font-size: 26px; color: #fff; font-weight: 700; line-height: 1.3; }
 
-  /* ---------- before/after slider ---------- */
-  #slider-box { margin: 18px 0 6px; }
-  #slider-wrap {
-    position: relative; border-radius: 8px; overflow: hidden;
-    border: 1px solid var(--cyan-dim); background: #000; touch-action: none;
+  /* ---------- forward-roll index ---------- */
+  #hunch-box {
+    margin: 18px 0 6px; padding: 16px 14px;
+    border: 1px solid var(--cyan-dim); border-radius: 8px;
+    background: linear-gradient(180deg, rgba(36,221,221,0.06), transparent);
   }
-  #slider-wrap canvas { width: 100%; display: block; }
-  #after-layer { position: absolute; inset: 0; }
-  #after-layer canvas { width: 100%; height: 100%; }
-  #slider-handle {
-    position: absolute; top: 0; bottom: 0; width: 2px; background: var(--cyan);
-    box-shadow: 0 0 12px var(--cyan); pointer-events: none;
+  #hunch-head { display: flex; align-items: center; gap: 14px; margin: 4px 0 12px; }
+  #hunch-num {
+    font-family: 'Consolas', monospace; font-size: 40px; font-weight: 700;
+    color: #fff; line-height: 1; letter-spacing: -1px;
+    text-shadow: 0 0 22px var(--cyan-dim);
   }
-  #slider-handle::after {
-    content: '◄ ►'; position: absolute; top: 50%; left: 50%;
-    transform: translate(-50%, -50%);
-    font-family: monospace; font-size: 11px; color: var(--bg);
-    background: var(--cyan); padding: 6px 8px; border-radius: 20px; white-space: nowrap;
+  #hunch-label {
+    font-family: monospace; font-size: 12px; letter-spacing: 2px;
+    color: var(--cyan); margin-bottom: 4px;
   }
-  .slider-tag {
-    position: absolute; top: 10px; font-family: monospace; font-size: 10px;
-    letter-spacing: 2px; padding: 4px 8px; border-radius: 3px;
-    background: rgba(4,8,15,0.8); pointer-events: none;
+  #hunch-note { font-size: 12.5px; color: #9dc4d4; line-height: 1.45; }
+  #hunch-track {
+    height: 8px; border-radius: 4px; overflow: hidden;
+    background: rgba(36,221,221,0.12);
   }
-  .slider-tag.l { left: 10px; color: var(--orange); border: 1px solid rgba(255,179,71,0.4); }
-  .slider-tag.r { right: 10px; color: var(--green); border: 1px solid rgba(61,255,160,0.4); }
-  #slider-range {
-    position: absolute; inset: 0; width: 100%; height: 100%;
-    opacity: 0; cursor: ew-resize; margin: 0;
+  .hunch-fill {
+    height: 100%; width: 0;
+    transition: width 1.4s cubic-bezier(0.22, 1, 0.36, 1);
+    background: var(--cyan); box-shadow: 0 0 14px var(--cyan-dim);
   }
-  .sim-note {
+  .hunch-fill.good { background: var(--green); box-shadow: 0 0 14px rgba(61,255,160,0.5); }
+  .hunch-fill.warn { background: var(--orange); box-shadow: 0 0 14px rgba(255,179,71,0.5); }
+  .hunch-fill.bad  { background: var(--red); box-shadow: 0 0 14px rgba(255,90,110,0.5); }
+  .hunch-scale {
+    display: flex; justify-content: space-between; margin-top: 6px;
+    font-family: monospace; font-size: 9px; letter-spacing: 1.5px; color: #4d7d90;
+  }
+
+  /* the measured figure under each checkpoint name */
+  .metric-detail {
+    display: block; font-family: monospace; font-size: 11px;
+    color: var(--cyan); opacity: 0.85; letter-spacing: 0.5px; margin-top: 3px;
+  }
+  .measure-note {
     font-family: monospace; font-size: 9.5px; color: #4d7d90;
-    text-align: center; margin-top: 8px; letter-spacing: 0.5px; line-height: 1.5;
+    text-align: center; margin-top: 10px; letter-spacing: 0.5px; line-height: 1.5;
   }
 
   .cta-box {
@@ -509,20 +523,22 @@
         <div class="subscore"><div class="lbl">SIDE</div><div class="val" id="sub-side">–</div></div>
       </div>
 
-      <div id="slider-box">
-        <div class="sys-label">▸ ALIGNMENT SIMULATION · DRAG TO COMPARE</div>
-        <div id="slider-wrap">
-          <canvas id="before-canvas"></canvas>
-          <div id="after-layer"><canvas id="after-canvas"></canvas></div>
-          <div class="slider-tag l">NOW</div>
-          <div class="slider-tag r">ALIGNED</div>
-          <div id="slider-handle"></div>
-          <input type="range" id="slider-range" min="0" max="100" value="50" aria-label="Compare current and aligned posture">
+      <div id="hunch-box" class="hidden">
+        <div class="sys-label">▸ FORWARD ROLL · UPPER BODY</div>
+        <div id="hunch-head">
+          <div id="hunch-num">0%</div>
+          <div id="hunch-side">
+            <div id="hunch-label"></div>
+            <div id="hunch-note"></div>
+          </div>
         </div>
-        <div class="sim-note">Simulated visualisation of your own photo with alignment corrected.<br>Not a prediction of results.</div>
+        <div id="hunch-track"><div id="hunch-fill" class="hunch-fill"></div></div>
+        <div class="hunch-scale"><span>STACKED</span><span>FULLY ROUNDED</span></div>
       </div>
 
       <div id="metrics-final"></div>
+      <div class="measure-note">Distances are estimated from your photo by the pose model — good to
+        roughly a quarter-inch, not a clinical measurement.</div>
 
       <div class="btn-row" style="margin-top:18px">
         <button class="btn" id="btn-share">⇪ Share Score</button>

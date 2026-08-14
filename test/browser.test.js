@@ -272,40 +272,6 @@ const skip = (section) => {
   check('both planes reported', heads.length === 2 && heads.some(h => /FRONTAL/.test(h)) && heads.some(h => /SAGITTAL/.test(h)),
         JSON.stringify(heads));
 
-  console.log('\n── Alignment simulation (mesh warp)');
-  const warp = await page.evaluate(() => {
-    const b = document.getElementById('before-canvas');
-    const a = document.getElementById('after-canvas');
-    if (!b.width || !a.width) return { ok: false };
-    const bc = b.getContext('2d').getImageData(0, 0, b.width, b.height).data;
-    const ac = a.getContext('2d').getImageData(0, 0, a.width, a.height).data;
-    let diff = 0, nonBlank = 0;
-    for (let i = 0; i < bc.length; i += 4 * 97) {
-      if (Math.abs(bc[i] - ac[i]) > 6) diff++;
-      if (ac[i] > 8) nonBlank++;
-    }
-    const n = Math.floor(bc.length / (4 * 97));
-    return { ok: true, w: a.width, h: a.height, diffFrac: diff / n, nonBlankFrac: nonBlank / n };
-  });
-  check('both canvases sized', warp.ok && warp.w > 0 && warp.h > 0, JSON.stringify(warp));
-  check('warped output is not blank', warp.nonBlankFrac > 0.5, JSON.stringify(warp));
-  check('warped output differs from the original', warp.diffFrac > 0.01, JSON.stringify(warp));
-  check('warp is subtle, not destroyed (<60% of pixels)', warp.diffFrac < 0.6, JSON.stringify(warp));
-
-  const slider = await page.evaluate(() => {
-    const r = document.getElementById('slider-range');
-    r.value = 20; r.dispatchEvent(new Event('input'));
-    const clip = document.getElementById('after-layer').style.clipPath;
-    return clip;
-  });
-  check('slider drives the clip path', /20%/.test(slider), slider);
-
-  console.log('\n── CTA deep link');
-  const cta = await page.getAttribute('#btn-kinapt', 'href');
-  console.log(`     ${cta}`);
-  check('CTA points at the App Store', /apps\.apple\.com/.test(cta), cta);
-  check('CTA carries scan attribution', /ct=posture-scan/.test(cta) && /score=/.test(cta), cta);
-
   console.log('\n── Rescan resets state');
   await page.click('#btn-retry');
   await page.waitForSelector('#panel-capture.active', { timeout: 5000 });
@@ -343,6 +309,53 @@ const skip = (section) => {
   // The warm-up during the briefing is what should make these two alike.
   check('the first scan is not much slower than the next', sweep.first < sweep.second + 900,
         `${Math.round(sweep.first)}ms then ${Math.round(sweep.second)}ms`);
+
+  console.log('\n── Objective measurements');
+  // Driven through the seam rather than two photographs, so this runs with or
+  // without a fixture — it is the score panel being tested, not detection.
+  await page.evaluate(() => {
+    const mk = (name, severity, detail) => ({ name, severity, detail, weight: 1, tip: '' });
+    window.__scan.renderResult({
+      score: 63, frontScore: 71, sideScore: 55, hunch: 58,
+      frontMetrics: [mk('SHOULDER BALANCE', 0.3, '0.6 in uneven'),
+                     mk('PELVIC LEVEL', 0.2, '0.4 in drop'),
+                     mk('TRUNK LEAN', 0.1, '2.1° off vertical')],
+      sideMetrics: [mk('FORWARD HEAD', 0.8, '1.8 in ahead of shoulder'),
+                    mk('SHOULDER PROTRACTION', 0.5, '1.1 in ahead of hip'),
+                    mk('THORACIC CURVE', 0.6, '1.4 in of upper-back curve')]
+    });
+  });
+  await page.waitForTimeout(2200);
+  const meas = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('#metrics-final .metric-row')];
+    const details = rows.map(r => (r.querySelector('.metric-detail') || {}).textContent || null);
+    const hb = document.getElementById('hunch-box');
+    return {
+      rows: rows.length,
+      withDetail: details.filter(Boolean).length,
+      inches: details.filter(d => d && / in\b/.test(d)).length,
+      sample: details.filter(Boolean).slice(0, 4),
+      hunchShown: !hb.classList.contains('hidden'),
+      hunchNum: document.getElementById('hunch-num').textContent,
+      hunchLabel: document.getElementById('hunch-label').textContent
+    };
+  });
+  console.log('    ', JSON.stringify(meas.sample), meas.hunchNum, meas.hunchLabel);
+  check('every checkpoint reports a figure', meas.withDetail === meas.rows,
+        `${meas.withDetail}/${meas.rows}`);
+  check('at least some are real distances', meas.inches > 0, JSON.stringify(meas.sample));
+  check('forward-roll index shown', meas.hunchShown, JSON.stringify(meas));
+  check('forward-roll index is a percentage', /^\d+%$/.test(meas.hunchNum), meas.hunchNum);
+  check('forward-roll index carries a label', meas.hunchLabel.length > 3, meas.hunchLabel);
+  check('the drag-to-perfect simulation is gone', await page.evaluate(() =>
+    !document.getElementById('slider-range') && !document.getElementById('after-canvas')));
+
+  console.log('\n── CTA deep link');
+  const cta = await page.getAttribute('#btn-kinapt', 'href');
+  console.log(`     ${cta}`);
+  check('CTA points at the real KinaPT listing',
+        /apps\.apple\.com\/us\/app\/kina-pt\/id6755166316/.test(cta), cta);
+  check('CTA carries scan attribution', /ct=posture-scan/.test(cta) && /score=/.test(cta), cta);
 
   console.log('\n── Share card');
   const card = await page.evaluate(() => {

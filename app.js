@@ -4,22 +4,21 @@
    Two-photo scan (frontal + sagittal), fully on-device:
    MediaPipe Pose Landmarker supplies landmarks, 3D world
    landmarks and a segmentation mask; posture.js turns those
-   into graded metrics; the alignment simulation mesh-warps the
-   user's own photo toward plumb.
+   into graded metrics, each reported as a real distance.
    ============================================================ */
 
 import {
   LM, SEV_LABELS, sevBucket, clamp,
   checkQuality, analyseBackContour,
   assessFront, assessSide, scoreOf, verdictFor,
-  idealTargets, solveAffine, makeDisplacer
+  hunchIndex, hunchBand
 } from './posture.js';
 
 /* ---------- configuration ---------- */
 
 // TODO: replace with the real KinaPT App Store listing before launch.
 // Format: https://apps.apple.com/app/id<APP_ID>
-const APPSTORE_URL = 'https://apps.apple.com/app/id0000000000';
+const APPSTORE_URL = 'https://apps.apple.com/us/app/kina-pt/id6755166316';
 
 /* ---------- custom media ----------
    Drop files into /assets and point these at them. Each one is optional:
@@ -1778,57 +1777,6 @@ function drawScene(ctx, img, W, H, lms, progress) {
   }
 }
 
-/* ---------- mesh warp (canvas side of the simulation) ---------- */
-function expandFrom(p, cx, cy, px) {
-  const dx = p.x - cx, dy = p.y - cy;
-  const len = Math.hypot(dx, dy) || 1e-6;
-  return { x: p.x + (dx / len) * px, y: p.y + (dy / len) * px };
-}
-
-function warpImage(srcCanvas, controls, W, H) {
-  const out = document.createElement('canvas');
-  out.width = W; out.height = H;
-  const ctx = out.getContext('2d');
-  ctx.drawImage(srcCanvas, 0, 0); // base layer so edges never show gaps
-  if (!controls.length) return out;
-
-  const COLS = 20, ROWS = 26;
-  const displace = makeDisplacer(controls, W, H, COLS, ROWS);
-
-  const src = [], dst = [];
-  for (let j = 0; j <= ROWS; j++) {
-    for (let i = 0; i <= COLS; i++) {
-      const x = (i / COLS) * W, y = (j / ROWS) * H;
-      src.push({ x, y });
-      dst.push(displace(x, y));
-    }
-  }
-  const at = (i, j) => j * (COLS + 1) + i;
-
-  for (let j = 0; j < ROWS; j++) {
-    for (let i = 0; i < COLS; i++) {
-      const q = [at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j + 1)];
-      for (const [m, n, o] of [[0, 1, 2], [0, 2, 3]]) {
-        const s = [src[q[m]], src[q[n]], src[q[o]]];
-        const d = [dst[q[m]], dst[q[n]], dst[q[o]]];
-        const mat = solveAffine(s[0], s[1], s[2], d[0], d[1], d[2]);
-        if (!mat) continue;
-        const cx = (d[0].x + d[1].x + d[2].x) / 3, cy = (d[0].y + d[1].y + d[2].y) / 3;
-        const de = d.map(pt => expandFrom(pt, cx, cy, 0.7)); // hides seams
-        ctx.save();
-        ctx.beginPath();
-        ctx.moveTo(de[0].x, de[0].y); ctx.lineTo(de[1].x, de[1].y); ctx.lineTo(de[2].x, de[2].y);
-        ctx.closePath(); ctx.clip();
-        ctx.setTransform(mat[0], mat[1], mat[2], mat[3], mat[4], mat[5]);
-        ctx.drawImage(srcCanvas, 0, 0);
-        ctx.restore();
-      }
-    }
-  }
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  return out;
-}
-
 /* ============================================================
    CAPTURE FLOW
    ============================================================ */
@@ -2167,7 +2115,8 @@ async function runFullAnalysis() {
     frontMetrics, sideMetrics,
     frontScore: scoreOf(frontMetrics),
     sideScore: scoreOf(sideMetrics),
-    score: scoreOf(all)
+    score: scoreOf(all),
+    hunch: hunchIndex(sideMetrics)
   };
   updateCta();
 
@@ -2201,12 +2150,46 @@ function metricRow(m) {
   const name = document.createElement('span');
   name.className = 'metric-name';
   name.textContent = '▸ ' + m.name;
+  // The measured figure, not just a severity word — "1.8 in ahead of shoulder"
+  // is a thing you can picture, and re-measure later to see it change.
+  if (m.detail) {
+    const d = document.createElement('span');
+    d.className = 'metric-detail';
+    d.textContent = m.detail;
+    name.appendChild(d);
+  }
   const badge = document.createElement('span');
   badge.className = 'metric-badge sev-' + b;
   badge.textContent = SEV_LABELS[b];
   row.appendChild(name); row.appendChild(badge);
   row.title = m.tip;
   return row;
+}
+
+/* ---------- hunch index ---------- */
+function showHunch(result) {
+  const box = $('hunch-box');
+  if (result.hunch === null || result.hunch === undefined) {
+    box.classList.add('hidden');
+    return;
+  }
+  box.classList.remove('hidden');
+  const band = hunchBand(result.hunch);
+  $('hunch-label').textContent = band.label;
+  $('hunch-note').textContent = band.note;
+  const bar = $('hunch-fill');
+  bar.style.width = '0%';
+  bar.className = 'hunch-fill ' + (result.hunch < 35 ? 'good' : result.hunch < 60 ? 'warn' : 'bad');
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    bar.style.width = result.hunch + '%';
+  }));
+  const num = $('hunch-num');
+  const t0 = performance.now();
+  (function count() {
+    const pr = Math.min(1, (performance.now() - t0) / 1600);
+    num.textContent = Math.round(result.hunch * (1 - Math.pow(1 - pr, 3))) + '%';
+    if (pr < 1) requestAnimationFrame(count);
+  })();
 }
 
 /* ---------- score panel ---------- */
@@ -2254,40 +2237,11 @@ function revealScore(result) {
     if (pr < 1) requestAnimationFrame(count);
   })();
 
-  buildSimulation();
-  say(v.voice + ' Drag the slider to see your aligned posture. To correct these deviations, I recommend the Kina P T protocol.');
-}
-
-/* ---------- before/after alignment simulation ---------- */
-function buildSimulation() {
-  // The sagittal view shows postural change most clearly.
-  const src = state.side || state.front;
-  const view = state.side ? 'side' : 'front';
-  if (!src) { $('slider-box').classList.add('hidden'); return; }
-
-  const W = src.W, H = src.H;
-  const before = $('before-canvas');
-  before.width = W; before.height = H;
-  before.getContext('2d').drawImage(src.img, 0, 0, W, H);
-
-  const after = $('after-canvas');
-  after.width = W; after.height = H;
-  const actx = after.getContext('2d');
-  try {
-    const warped = warpImage(before, idealTargets(src.lms, view, W, H), W, H);
-    actx.drawImage(warped, 0, 0);
-  } catch (e) {
-    actx.drawImage(before, 0, 0); // never break the page over a cosmetic feature
-  }
-
-  const range = $('slider-range');
-  const apply = (pct) => {
-    $('after-layer').style.clipPath = `inset(0 0 0 ${pct}%)`;
-    $('slider-handle').style.left = `calc(${pct}% - 1px)`;
-  };
-  range.addEventListener('input', () => apply(+range.value));
-  range.value = 50;
-  apply(50);
+  showHunch(result);
+  const hp = result.hunch;
+  say(v.voice + (hp === null ? '' :
+      ` Your upper body is ${hp} percent of the way to a fully rounded posture.`) +
+      ' To correct these deviations, I recommend the Kina P T protocol.');
 }
 
 /* ---------- share ---------- */
@@ -2306,7 +2260,7 @@ function buildShareCard(result) {
   ctx.fillStyle = '#7fb2c6'; ctx.font = '26px monospace';
   ctx.fillText('AI POSTURE ANALYSIS · 2-VIEW SCAN', W / 2, 176);
 
-  const cx = W / 2, cy = 520, r = 235;
+  const cx = W / 2, cy = 470, r = 212;
   ctx.strokeStyle = 'rgba(36,221,221,0.17)'; ctx.lineWidth = 32;
   ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.stroke();
   const col = result.score >= 75 ? '#5fe6b0' : result.score >= 55 ? '#24dddd' : result.score >= 40 ? '#ffb347' : '#ed4d42';
@@ -2314,26 +2268,52 @@ function buildShareCard(result) {
   ctx.shadowColor = col; ctx.shadowBlur = 30;
   ctx.beginPath(); ctx.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + (result.score / 100) * Math.PI * 2); ctx.stroke();
   ctx.shadowBlur = 0;
-  ctx.fillStyle = '#fff'; ctx.font = '700 180px monospace';
-  ctx.fillText(String(result.score), cx, cy + 52);
-  ctx.fillStyle = '#7fb2c6'; ctx.font = '38px monospace';
-  ctx.fillText('/ 100', cx, cy + 118);
+  ctx.fillStyle = '#fff'; ctx.font = '700 164px monospace';
+  ctx.fillText(String(result.score), cx, cy + 46);
+  ctx.fillStyle = '#7fb2c6'; ctx.font = '36px monospace';
+  ctx.fillText('/ 100', cx, cy + 106);
 
   const v = verdictFor(result.score);
   ctx.fillStyle = '#fff'; ctx.font = '600 50px sans-serif';
-  ctx.fillText(v.title.replace(/^[^\w]+\s*/, ''), W / 2, 862);
+  ctx.fillText(v.title.replace(/^[^\w]+\s*/, ''), W / 2, 786);
   ctx.font = '30px monospace'; ctx.fillStyle = '#7fb2c6';
-  ctx.fillText(`FRONT ${result.frontScore}    ·    SIDE ${result.sideScore}`, W / 2, 918);
+  ctx.fillText(`FRONT ${result.frontScore}    ·    SIDE ${result.sideScore}`, W / 2, 840);
+
+  let y = 918;
+  // The forward-roll figure is the line people actually quote at each other,
+  // so it gets its own band rather than sitting in the checkpoint list.
+  if (result.hunch !== null && result.hunch !== undefined) {
+    const hc = result.hunch < 35 ? '#5fe6b0' : result.hunch < 60 ? '#ffb347' : '#ed4d42';
+    ctx.fillStyle = 'rgba(36,221,221,0.07)';
+    ctx.fillRect(100, y - 46, W - 200, 96);
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#7fb2c6'; ctx.font = '26px monospace';
+    ctx.fillText('FORWARD ROLL · UPPER BODY', 128, y - 8);
+    ctx.fillStyle = '#b8dced'; ctx.font = '28px monospace';
+    ctx.fillText(hunchBand(result.hunch).label, 128, y + 32);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = hc; ctx.font = '700 64px monospace';
+    ctx.fillText(result.hunch + '%', W - 128, y + 22);
+    y += 122;
+  }
 
   ctx.font = '29px monospace'; ctx.textAlign = 'left';
-  let y = 990;
   const top = result.frontMetrics.concat(result.sideMetrics)
-    .sort((a, b) => b.severity - a.severity).slice(0, 5);
+    // Three when the forward-roll band is present — a fourth row collides with
+    // the footer, and the band is the more useful line anyway.
+    .sort((a, b) => b.severity - a.severity).slice(0, result.hunch === null ? 5 : 3);
   for (const m of top) {
     const b = sevBucket(m.severity);
     ctx.fillStyle = '#b8dced'; ctx.fillText('▸ ' + m.name, 110, y);
-    ctx.fillStyle = ['#5fe6b0', '#24dddd', '#ffb347', '#ed4d42'][b];
-    ctx.textAlign = 'right'; ctx.fillText(SEV_LABELS[b], W - 110, y);
+    ctx.textAlign = 'right';
+    if (m.detail) {
+      ctx.fillStyle = '#7fb2c6'; ctx.font = '25px monospace';
+      ctx.fillText(m.detail, W - 110, y);
+      ctx.font = '29px monospace';
+    } else {
+      ctx.fillStyle = ['#5fe6b0', '#24dddd', '#ffb347', '#ed4d42'][b];
+      ctx.fillText(SEV_LABELS[b], W - 110, y);
+    }
     ctx.textAlign = 'left';
     y += 52;
   }
@@ -2429,7 +2409,10 @@ if (IS_IOS) {
    can drive the flow without a live camera. Never active on the deployed site. */
 if (['localhost', '127.0.0.1'].includes(location.hostname)) {
   window.__scan = {
-    state, ingest, runFullAnalysis, buildShareCard, warpImage, getLandmarker, showPanel,
+    state, ingest, runFullAnalysis, buildShareCard, getLandmarker, showPanel,
+    // Render a finished result without needing two photographs, so the score
+    // panel can be tested on its own.
+    renderResult: (r) => { lastResult = r; updateCta(); showPanel('panel-score'); revealScore(r); },
     boot: () => ({ running: bootRunning, done: bootDone }),
     warmDetector,
     spectrum: () => lastSpec,

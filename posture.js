@@ -149,8 +149,55 @@ export function analyseBackContour(maskData, mw, mh, lms, facingRight) {
    ============================================================ */
 
 function makeAdder(list) {
-  return (name, severity, tip, weight = 1) =>
-    list.push({ name, severity: clamp(severity, 0, 1), tip, weight });
+  return (name, severity, tip, weight = 1, detail = null) =>
+    list.push({ name, severity: clamp(severity, 0, 1), tip, weight, detail });
+}
+
+/* ============================================================
+   REAL-WORLD SCALE
+
+   The planar maths works in image units, which mean nothing to a reader.
+   MediaPipe's world landmarks are metric — roughly, a body-shaped model fitted
+   to the image — so the torso gives a conversion factor from image units to
+   inches.
+
+   Read the accuracy honestly: the metric fit is estimated from one photograph
+   by a generic model, so absolute scale carries real error. It is good enough
+   to say "about an inch and a half" and wrong to present as a clinical
+   measurement, which is why everything below rounds to a tenth of an inch and
+   the UI labels it an estimate.
+   ============================================================ */
+const IN_PER_M = 39.3701;
+
+function dist3(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+}
+
+/** Inches per image y-unit, from the torso measured both ways. Null if unusable. */
+export function inchScale(lms, world, imgW, imgH) {
+  if (!world) return null;
+  const p = aspectFix(lms, imgW, imgH);
+  const imgTorso = dist(mid(p(LM.leftShoulder), p(LM.rightShoulder)),
+                        mid(p(LM.leftHip), p(LM.rightHip)));
+  if (!(imgTorso > 1e-4)) return null;
+  const wSh = { x: (world[LM.leftShoulder].x + world[LM.rightShoulder].x) / 2,
+                y: (world[LM.leftShoulder].y + world[LM.rightShoulder].y) / 2,
+                z: (world[LM.leftShoulder].z + world[LM.rightShoulder].z) / 2 };
+  const wHip = { x: (world[LM.leftHip].x + world[LM.rightHip].x) / 2,
+                 y: (world[LM.leftHip].y + world[LM.rightHip].y) / 2,
+                 z: (world[LM.leftHip].z + world[LM.rightHip].z) / 2 };
+  const worldTorso = dist3(wSh, wHip);
+  // A torso outside 20-80 cm means the metric fit has gone wrong; better to
+  // show no number than a confident wrong one.
+  if (!(worldTorso > 0.2 && worldTorso < 0.8)) return null;
+  return (worldTorso * IN_PER_M) / imgTorso;
+}
+
+/** Format an image-unit offset as inches, or null when there is no scale. */
+function inches(units, scale, suffix = '') {
+  if (!scale) return null;
+  const v = Math.abs(units) * scale;
+  return `${v.toFixed(1)} in${suffix}`;
 }
 
 /* ---------- FRONTAL PLANE ---------- */
@@ -165,25 +212,31 @@ export function assessFront(lms, world, imgW, imgH) {
 
   const metrics = [];
   const add = makeAdder(metrics);
+  const scale = inchScale(lms, world, imgW, imgH);
 
   // Shoulder height difference. A sign of lateral asymmetry — deliberately
   // NOT labelled as a spinal diagnosis.
   const shTilt = Math.abs(deg(Math.atan2(ls.y - rs.y, ls.x - rs.x)));
   add('SHOULDER BALANCE', shTilt / 9,
-      'One shoulder sits higher than the other — common with bag-carrying or a dominant side.', 1.2);
+      'One shoulder sits higher than the other — common with bag-carrying or a dominant side.', 1.2,
+      inches(ls.y - rs.y, scale, ' uneven') || `${shTilt.toFixed(1)}° tilt`);
 
   // Pelvic obliquity (hip drop).
   const hipTilt = Math.abs(deg(Math.atan2(lh.y - rh.y, lh.x - rh.x)));
   add('PELVIC LEVEL', hipTilt / 8,
-      'Your hips are uneven — often a hip-hitch habit or a leg-length difference.', 1.2);
+      'Your hips are uneven — often a hip-hitch habit or a leg-length difference.', 1.2,
+      inches(lh.y - rh.y, scale, ' drop') || `${hipTilt.toFixed(1)}° tilt`);
 
   // Lateral trunk lean from vertical.
   const lean = Math.abs(deg(Math.atan2(midSh.x - midHip.x, midHip.y - midSh.y)));
-  add('TRUNK LEAN', lean / 7, 'Your upper body leans off the vertical.', 1.2);
+  add('TRUNK LEAN', lean / 7, 'Your upper body leans off the vertical.', 1.2,
+      `${lean.toFixed(1)}° off vertical`);
 
   // Head centring over the shoulders.
   const headShift = Math.abs(p(LM.nose).x - midSh.x) / shoulderW;
-  add('HEAD CENTRING', headShift / 0.32, 'Your head drifts off your body\'s midline.', 1);
+  add('HEAD CENTRING', headShift / 0.32, 'Your head drifts off your body\'s midline.', 1,
+      inches(p(LM.nose).x - midSh.x, scale, ' off centre') ||
+        `${(headShift * 100).toFixed(0)}% of shoulder width`);
 
   // Knee valgus / varus: perpendicular offset of the knee from the
   // hip→ankle mechanical axis, signed toward the body midline.
@@ -202,9 +255,12 @@ export function assessFront(lms, world, imgW, imgH) {
   if (knees.length) {
     const worst = knees.reduce((a, b) => Math.abs(a) > Math.abs(b) ? a : b);
     const valgus = worst > 0;
+    const legLen = dist(p(LM.leftHip), p(LM.leftAnkle)) || dist(p(LM.rightHip), p(LM.rightAnkle));
     add(valgus ? 'KNEE VALGUS' : 'KNEE VARUS', Math.abs(worst) / 0.055,
         valgus ? 'Your knees track inward of the hip-to-ankle line.'
-               : 'Your knees track outward of the hip-to-ankle line.', 1.1);
+               : 'Your knees track outward of the hip-to-ankle line.', 1.1,
+        inches(worst * legLen, scale, valgus ? ' inward' : ' outward') ||
+          `${(Math.abs(worst) * 100).toFixed(1)}% of leg length`);
   }
 
   // Foot progression (forefoot abduction). Measured in 3D against the
@@ -215,7 +271,8 @@ export function assessFront(lms, world, imgW, imgH) {
   if (feet.length) {
     const avg = feet.reduce((a, b) => a + b, 0) / feet.length;
     add('FOOT PROGRESSION', Math.max(0, avg - 10) / 18,
-        'Your forefoot turns out more than typical — can accompany a flattened arch.', 0.8);
+        'Your forefoot turns out more than typical — can accompany a flattened arch.', 0.8,
+        `${avg.toFixed(0)}° toe-out`);
   }
 
   return metrics;
@@ -264,23 +321,36 @@ export function assessSide(lms, world, imgW, imgH, contour) {
 
   const metrics = [];
   const add = makeAdder(metrics);
+  const scale = inchScale(lms, world, imgW, imgH);
 
   // Forward head: ear anterior to the acromion.
   const fwdHead = ((ear.x - sh.x) * fwd) / torsoLen;
   add('FORWARD HEAD', Math.max(0, fwdHead) / 0.28,
-      '"Tech neck" — a forward head position can add significant load to the neck and upper back.', 1.5);
+      '"Tech neck" — a forward head position can add significant load to the neck and upper back.', 1.5,
+      inches(Math.max(0, fwdHead) * torsoLen, scale, ' ahead of shoulder') ||
+        `${(Math.max(0, fwdHead) * 100).toFixed(0)}% of torso length`);
 
   // Rounded shoulders: acromion anterior to the greater trochanter.
   const round = ((sh.x - hip.x) * fwd) / torsoLen;
   add('SHOULDER PROTRACTION', Math.max(0, round) / 0.2,
-      'Your shoulders sit ahead of your hips — a rounded, protracted shoulder pattern.', 1.3);
+      'Your shoulders sit ahead of your hips — a rounded, protracted shoulder pattern.', 1.3,
+      inches(Math.max(0, round) * torsoLen, scale, ' ahead of hip') ||
+        `${(Math.max(0, round) * 100).toFixed(0)}% of torso length`);
 
   // Spinal curves from the body outline, when the mask gave us one.
+  // Both are normalised by the shoulder-to-hip span, so the torso converts
+  // them straight into a depth.
   if (contour) {
     add('THORACIC CURVE', Math.max(0, contour.kyphosis - 0.045) / 0.075,
-        'The upper back curves more than typical — a rounded thoracic spine.', 1.2);
+        'The upper back curves more than typical — a rounded thoracic spine.', 1.2,
+        inches(contour.kyphosis * torsoLen, scale, ' of upper-back curve') ||
+          `${(contour.kyphosis * 100).toFixed(1)}% of torso length`);
+    const deeper = contour.lordosis >= 0.05;
     add('LUMBAR CURVE', Math.abs(contour.lordosis - 0.05) / 0.06,
-        'Your low-back curve is deeper or flatter than the typical range.', 1);
+        'Your low-back curve is deeper or flatter than the typical range.', 1,
+        inches(Math.abs(contour.lordosis - 0.05) * torsoLen, scale,
+               deeper ? ' deeper than typical' : ' flatter than typical') ||
+          `${(contour.lordosis * 100).toFixed(1)}% of torso length`);
   }
 
   if (hasLegs) {
@@ -288,15 +358,60 @@ export function assessSide(lms, world, imgW, imgH, contour) {
     // Sway back: hips carried ahead of the ankles.
     const sway = ((hip.x - ankle.x) * fwd) / legLen;
     add('PELVIS OVER BASE', Math.max(0, sway) / 0.12,
-        'Your hips ride ahead of your ankles — the classic sway-back stance.', 1);
+        'Your hips ride ahead of your ankles — the classic sway-back stance.', 1,
+        inches(Math.max(0, sway) * legLen, scale, ' ahead of ankle') ||
+          `${(Math.max(0, sway) * 100).toFixed(0)}% of leg length`);
 
     // Full clinical plumb chain: ankle → knee → hip → shoulder → ear.
     const refs = [knee, hip, sh, ear];
     const devSum = refs.reduce((s, pt) => s + Math.abs(pt.x - ankle.x), 0) / refs.length;
-    add('PLUMB LINE', (devSum / legLen) / 0.16, 'The ear-shoulder-hip-ankle line is broken.', 1.3);
+    add('PLUMB LINE', (devSum / legLen) / 0.16, 'The ear-shoulder-hip-ankle line is broken.', 1.3,
+        inches(devSum, scale, ' average drift') ||
+          `${((devSum / legLen) * 100).toFixed(0)}% of leg length`);
   }
 
   return metrics;
+}
+
+/* ============================================================
+   HUNCH INDEX
+
+   One number for the thing people actually recognise in the mirror: how far
+   the upper body has rolled forward. It is a weighted read of the three
+   sagittal checkpoints that make up that pattern — the thoracic curve itself,
+   the head carried ahead of the shoulders, and the shoulders ahead of the
+   hips — expressed as a percentage of the way from square to fully rounded.
+
+   It is a posture measurement, not a diagnosis: hyperkyphosis is a clinical
+   finding that needs a clinician and an X-ray, and nothing here is either.
+   0% is a stacked, neutral upper body; 100% is the far end of what this scan
+   can resolve.
+   ============================================================ */
+const HUNCH_PARTS = {
+  'THORACIC CURVE': 3,
+  'FORWARD HEAD': 2,
+  'SHOULDER PROTRACTION': 2
+};
+
+export function hunchIndex(sideMetrics) {
+  if (!sideMetrics || !sideMetrics.length) return null;
+  let sum = 0, wSum = 0;
+  for (const m of sideMetrics) {
+    const w = HUNCH_PARTS[m.name];
+    if (!w) continue;
+    sum += m.severity * w;
+    wSum += w;
+  }
+  if (!wSum) return null;
+  return Math.round(clamp(sum / wSum, 0, 1) * 100);
+}
+
+export function hunchBand(pct) {
+  if (pct < 15) return { label: 'STACKED', note: 'Your upper body sits square over your hips.' };
+  if (pct < 35) return { label: 'SLIGHT ROLL', note: 'A mild forward roll — the early desk-work pattern.' };
+  if (pct < 60) return { label: 'ROUNDED', note: 'A clear rounded-forward pattern through the upper back.' };
+  if (pct < 80) return { label: 'HEAVILY ROUNDED', note: 'Your upper back and head carry well forward of neutral.' };
+  return { label: 'EXTREME ROLL', note: 'At the far end of what this scan can measure. Worth a professional look.' };
 }
 
 /* ---------- scoring ---------- */
@@ -327,108 +442,5 @@ export function verdictFor(score) {
     title: '🚨 CRITICAL MISALIGNMENT',
     sub: 'Multiple checkpoints outside range. The good news: alignment responds fast to consistent daily correction.',
     voice: `${score} out of one hundred. This is... concerning. Your posture resembles a question mark. Deploying corrective protocol immediately.`
-  };
-}
-
-/* ============================================================
-   ALIGNMENT SIMULATION — geometry only
-   ============================================================ */
-
-export const WARP_STRENGTH = 0.85; // 1.0 = fully idealised; keep them recognisable
-
-/** Control points {sx,sy,dx,dy} in pixel space moving the body toward plumb. */
-export function idealTargets(lms, view, W, H) {
-  const P = (i) => ({ x: lms[i].x * W, y: lms[i].y * H });
-  const vis = (i) => (lms[i].visibility ?? 1);
-  const pts = [];
-  const push = (i, tx, ty) => {
-    if (vis(i) < 0.4) return;
-    const s = P(i);
-    pts.push({ sx: s.x, sy: s.y,
-               dx: s.x + (tx - s.x) * WARP_STRENGTH,
-               dy: s.y + (ty - s.y) * WARP_STRENGTH });
-  };
-
-  if (view === 'front') {
-    const ls = P(LM.leftShoulder), rs = P(LM.rightShoulder);
-    const lh = P(LM.leftHip), rh = P(LM.rightHip);
-    const midSh = mid(ls, rs), midHip = mid(lh, rh);
-    push(LM.leftShoulder, ls.x, midSh.y);
-    push(LM.rightShoulder, rs.x, midSh.y);
-    push(LM.leftHip, lh.x, midHip.y);
-    push(LM.rightHip, rh.x, midHip.y);
-    const nose = P(LM.nose);
-    push(LM.nose, midHip.x, nose.y);
-    for (const e of [LM.leftEar, LM.rightEar]) {
-      if (vis(e) < 0.4) continue;
-      const pt = P(e); push(e, pt.x + (midHip.x - nose.x), pt.y);
-    }
-    for (const [h, k, a] of [[LM.leftHip, LM.leftKnee, LM.leftAnkle],
-                             [LM.rightHip, LM.rightKnee, LM.rightAnkle]]) {
-      if (vis(k) < 0.4 || vis(a) < 0.4) continue;
-      const hp = P(h), kp = P(k), ap = P(a);
-      const t = (kp.y - hp.y) / ((ap.y - hp.y) || 1e-6);
-      push(k, hp.x + (ap.x - hp.x) * t, kp.y);
-    }
-  } else {
-    const anchorX = (vis(LM.leftAnkle) > 0.4 || vis(LM.rightAnkle) > 0.4)
-      ? (vis(LM.leftAnkle) >= vis(LM.rightAnkle) ? P(LM.leftAnkle).x : P(LM.rightAnkle).x)
-      : mid(P(LM.leftHip), P(LM.rightHip)).x;
-    // Trunk lands on the plumb line.
-    for (const i of [LM.leftHip, LM.rightHip, LM.leftShoulder, LM.rightShoulder]) {
-      if (vis(i) < 0.4) continue;
-      push(i, anchorX, P(i).y);
-    }
-    // The earlobe is the classic plumb reference, but the face must travel
-    // with the head as a rigid unit — pulling the nose onto the line too
-    // would flatten the profile.
-    const earI = vis(LM.leftEar) >= vis(LM.rightEar) ? LM.leftEar : LM.rightEar;
-    if (vis(earI) >= 0.4) {
-      const shift = anchorX - P(earI).x;
-      for (const i of [LM.leftEar, LM.rightEar, LM.nose]) {
-        if (vis(i) < 0.4) continue;
-        const pt = P(i);
-        push(i, pt.x + shift, pt.y);
-      }
-    }
-  }
-  return pts;
-}
-
-/** Affine matrix [a,b,c,d,e,f] mapping source triangle → destination triangle. */
-export function solveAffine(s0, s1, s2, d0, d1, d2) {
-  const den = s0.x * (s2.y - s1.y) + s1.x * (s0.y - s2.y) + s2.x * (s1.y - s0.y);
-  if (Math.abs(den) < 1e-9) return null;
-  const m = (q0, q1, q2) => [
-    (q0 * (s2.y - s1.y) + q1 * (s0.y - s2.y) + q2 * (s1.y - s0.y)) / den,
-    (q0 * (s1.x - s2.x) + q1 * (s2.x - s0.x) + q2 * (s0.x - s1.x)) / den,
-    (q0 * (s1.x * s2.y - s2.x * s1.y) + q1 * (s2.x * s0.y - s0.x * s2.y)
-      + q2 * (s0.x * s1.y - s1.x * s0.y)) / den
-  ];
-  const [a, c, e] = m(d0.x, d1.x, d2.x);
-  const [b, d, f] = m(d0.y, d1.y, d2.y);
-  return [a, b, c, d, e, f];
-}
-
-/** Smooth, local displacement field from control points (inverse-distance). */
-export function makeDisplacer(controls, W, H, cols = 20, rows = 26) {
-  const anchors = [];
-  for (let i = 0; i <= cols; i++) {
-    anchors.push({ sx: (i / cols) * W, sy: 0, dx: (i / cols) * W, dy: 0 });
-    anchors.push({ sx: (i / cols) * W, sy: H, dx: (i / cols) * W, dy: H });
-  }
-  for (let j = 0; j <= rows; j++) {
-    anchors.push({ sx: 0, sy: (j / rows) * H, dx: 0, dy: (j / rows) * H });
-    anchors.push({ sx: W, sy: (j / rows) * H, dx: W, dy: (j / rows) * H });
-  }
-  const all = controls.concat(anchors);
-  const eps = Math.pow(Math.min(W, H) * 0.45, 2) * 0.02;
-  return (x, y) => {
-    let wsum = 0, ax = 0, ay = 0;
-    for (const c of all) {
-      const w = 1 / ((x - c.sx) ** 2 + (y - c.sy) ** 2 + eps);
-      wsum += w; ax += w * (c.dx - c.sx); ay += w * (c.dy - c.sy);
-    }
-    return wsum ? { x: x + ax / wsum, y: y + ay / wsum } : { x, y };
   };
 }

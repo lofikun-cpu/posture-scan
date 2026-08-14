@@ -2,9 +2,10 @@
 
 A "Jarvis"-style HUD web app. The user takes **two photos** (front and side),
 an on-device AI grades their alignment across 12 biomechanical checkpoints,
-delivers a score out of 100 with a synthesized voice, shows a **before/after
-alignment simulation** of their own photo, generates a shareable score card,
-and deep-links to **KinaPT** on the App Store.
+delivers a score out of 100 with a synthesized voice, reports **how far each
+checkpoint sits from ideal in inches**, headlines a **forward-roll percentage**
+for the upper body, generates a shareable score card, and deep-links to
+**KinaPT** on the App Store.
 
 No backend. No API keys. No per-user cost.
 
@@ -36,7 +37,7 @@ Hosted free on **GitHub Pages**:
 Everything runs client-side. Pose estimation uses Google's **MediaPipe Pose
 Landmarker** (`full` model, ~9.4 MB), vendored into `/vendor` so the whole app
 is served from one origin — no third-party CDN. The Jarvis voice is the Web
-Speech API. Share cards and the alignment simulation are canvas.
+Speech API. Share cards are canvas.
 
 This is deliberate:
 - **$0 per user** — boosted traffic spikes cost nothing and can't take the app down
@@ -105,20 +106,29 @@ when feet are out of frame. The back-contour trace is discarded if it steps
 discontinuously, which is how an outstretched arm or a chair back gets caught
 instead of being scored as spinal curvature.
 
-## Alignment simulation
+## Measurements
 
-The before/after slider warps the user's **own photo** toward ideal alignment —
-no third-party image generation. Landmarks become control points; displacement
-spreads over a mesh via inverse-distance weighting, and each cell is drawn as
-two affine triangles. The trunk moves onto the plumb line while the face
-translates with the head as a rigid unit, so the profile stays natural. It stops
-at 85% of ideal so the person still looks like themselves, and it's labelled a
-simulation, not a prediction of results.
+Every checkpoint reports a figure, not just a severity word: "1.8 in ahead of
+shoulder", "0.6 in uneven", "17° toe-out". The planar maths works in image
+units, so the conversion comes from MediaPipe's world landmarks — a metric body
+fit — using the shoulder-to-hip torso as the ruler. That fit is estimated from
+a single photograph by a generic model, so absolute scale carries real error:
+figures are rounded to a tenth of an inch, labelled as estimates in the UI, and
+suppressed entirely (falling back to angles and percentages) when the fitted
+torso lands outside 20–80 cm, which means the fit has failed.
+
+## Forward-roll index
+
+One headline percentage for the pattern people recognise in the mirror: a
+weighted read of the thoracic curve, the head carried ahead of the shoulders,
+and the shoulders ahead of the hips. 0% is a stacked upper body, 100% the far
+end of what the scan resolves. It is a posture measurement and is not presented
+as a diagnosis — hyperkyphosis is a clinical finding that needs a clinician.
 
 ## Tests
 
 ```bash
-node test/posture.test.mjs     # 57 checks, no dependencies
+node test/posture.test.mjs     # 63 checks, no dependencies
 ```
 
 Covers the full analysis engine: perfect-posture baselines, aspect-ratio

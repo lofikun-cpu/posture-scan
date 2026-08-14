@@ -5,7 +5,7 @@
 import {
   LM, sevBucket, bodyRotation, checkQuality, analyseBackContour,
   assessFront, assessSide, scoreOf, footProgression,
-  idealTargets, solveAffine, makeDisplacer
+  inchScale, hunchIndex, hunchBand
 } from '../posture.js';
 
 let pass = 0, fail = 0;
@@ -362,47 +362,82 @@ section('Back-contour curvature from the segmentation mask');
 }
 
 /* ============================================================ */
-section('Alignment simulation geometry');
+/* ============================================================ */
+section('Real-world measurements');
 
 {
-  const W = 1080, H = 1920;
-  const lms = buildLms(perfectSidePhys(), PORTRAIT);
-  const fh = JSON.parse(JSON.stringify(perfectSidePhys()));
-  fh[LM.leftEar].x += 0.08; fh[LM.nose].x += 0.08;
-  const bad = buildLms(fh, PORTRAIT);
+  /* The default world fixtures leave the shoulders at the origin, which is not
+     a body — inchScale is supposed to refuse that rather than invent a number.
+     This one is a plausible torso: 0.35 m from shoulder centre to hip centre. */
+  const WORLD_SCALED = buildWorld({
+    [LM.leftShoulder]: { x: -0.18, y: -0.25, z: 0 },
+    [LM.rightShoulder]: { x: 0.18, y: -0.25, z: 0 },
+    [LM.leftHip]: { x: -0.1, y: 0.1, z: 0 }, [LM.rightHip]: { x: 0.1, y: 0.1, z: 0 },
+    [LM.nose]: { x: 0, y: -0.45, z: 0.1 },
+    [LM.leftHeel]: { x: -0.08, z: 0 }, [LM.leftFoot]: { x: -0.08, z: 0.15 },
+    [LM.rightHeel]: { x: 0.08, z: 0 }, [LM.rightFoot]: { x: 0.08, z: 0.15 }
+  });
+  const lms = buildLms(perfectFrontPhys.exact, PORTRAIT);
 
-  const t0 = idealTargets(lms, 'side', W, H);
-  check('warp: perfect side pose ⇒ ~no displacement',
-        t0.every(p => Math.abs(p.dx - p.sx) < 1e-6), JSON.stringify(t0.slice(0, 2)));
+  const scale = inchScale(lms, WORLD_SCALED, 1080, 1920);
+  // image torso is 0.30 height-units; 0.35 m is 13.78 in
+  check('scale: converts image units to inches', approx(scale, 13.7795 / 0.30, 0.01),
+        `got ${scale}`);
+  check('scale: refuses a world fit with no torso',
+        inchScale(lms, WORLD_FRONT, 1080, 1920) === null);
+  check('scale: refuses a missing world', inchScale(lms, null, 1080, 1920) === null);
 
-  const t1 = idealTargets(bad, 'side', W, H);
-  const earPt = t1.find(p => approx(p.sx, bad[LM.leftEar].x * W, 1));
-  check('warp: forward head is pulled back', earPt && earPt.dx < earPt.sx,
-        earPt && `sx=${earPt.sx.toFixed(1)} dx=${earPt.dx.toFixed(1)}`);
-  check('warp: 85% of the way to plumb, not 100%',
-        earPt && earPt.dx > bad[LM.leftAnkle].x * W,
-        earPt && `dx=${earPt.dx.toFixed(1)} anchor=${(bad[LM.leftAnkle].x * W).toFixed(1)}`);
+  // A shoulder raised by 0.02 height-units should read as 0.02 * scale inches.
+  const tilt = JSON.parse(JSON.stringify(perfectFrontPhys.exact));
+  tilt[LM.leftShoulder].y -= 0.02;
+  const m = assessFront(buildLms(tilt, PORTRAIT), WORLD_SCALED, 1080, 1920);
+  const sb = m.find(x => x.name === 'SHOULDER BALANCE');
+  const expected = (0.02 * scale).toFixed(1);
+  check('measurement: shoulder difference reported in inches',
+        sb.detail === `${expected} in uneven`, `${sb.detail} (expected ${expected} in uneven)`);
+  check('measurement: every frontal checkpoint carries a figure',
+        m.every(x => typeof x.detail === 'string' && x.detail.length > 2),
+        JSON.stringify(m.map(x => [x.name, x.detail])));
 
-  // affine solver
-  const m = solveAffine({ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0, y: 1 },
-                        { x: 0, y: 0 }, { x: 2, y: 0 }, { x: 0, y: 2 });
-  check('affine: 2× scale solves exactly',
-        m && approx(m[0], 2) && approx(m[3], 2) && approx(m[1], 0) && approx(m[2], 0)
-          && approx(m[4], 0) && approx(m[5], 0), JSON.stringify(m));
-  const deg2 = solveAffine({ x: 0, y: 0 }, { x: 1, y: 1 }, { x: 2, y: 2 },
-                           { x: 0, y: 0 }, { x: 1, y: 1 }, { x: 2, y: 2 });
-  check('affine: degenerate triangle ⇒ null', deg2 === null, JSON.stringify(deg2));
+  // Without a usable scale it must still say something, just not in inches.
+  const noScale = assessFront(buildLms(tilt, PORTRAIT), WORLD_FRONT, 1080, 1920);
+  check('measurement: falls back to angles when scale is unavailable',
+        noScale.every(x => x.detail && !x.detail.includes(' in ')),
+        JSON.stringify(noScale.map(x => x.detail)));
 
-  // displacement field
-  const disp = makeDisplacer([{ sx: 500, sy: 900, dx: 400, dy: 900 }], W, H);
-  const near = disp(500, 900), corner = disp(0, 0), far = disp(1070, 20);
-  check('displacer: moves toward the control point', near.x < 500, `got ${near.x.toFixed(1)}`);
-  check('displacer: image corners stay pinned',
-        Math.abs(corner.x) < 1 && Math.abs(corner.y) < 1, `got ${corner.x.toFixed(2)},${corner.y.toFixed(2)}`);
-  check('displacer: falls off with distance',
-        Math.abs(far.x - 1070) < Math.abs(near.x - 500),
-        `far=${Math.abs(far.x - 1070).toFixed(2)} near=${Math.abs(near.x - 500).toFixed(2)}`);
-  check('displacer: no NaN', Number.isFinite(near.x) && Number.isFinite(near.y));
+  const side = assessSide(buildLms(perfectSidePhys(), PORTRAIT), WORLD_SCALED, 1080, 1920,
+                          { kyphosis: 0.14, lordosis: 0.05 });
+  check('measurement: every sagittal checkpoint carries a figure',
+        side.every(x => typeof x.detail === 'string' && x.detail.length > 2),
+        JSON.stringify(side.map(x => [x.name, x.detail])));
+  const tc = side.find(x => x.name === 'THORACIC CURVE');
+  check('measurement: upper-back curve given as a depth in inches',
+        /^\d+\.\d in of upper-back curve$/.test(tc.detail), tc.detail);
+}
+
+/* ============================================================ */
+section('Hunch index');
+
+{
+  const flat = assessSide(buildLms(perfectSidePhys(), PORTRAIT), WORLD_SIDE, 1080, 1920,
+                          { kyphosis: 0.045, lordosis: 0.05 });
+  check('hunch: an upright side view reads 0%', hunchIndex(flat) === 0,
+        String(hunchIndex(flat)));
+
+  const rolled = JSON.parse(JSON.stringify(perfectSidePhys()));
+  rolled[LM.leftEar].x += 0.10; rolled[LM.nose].x += 0.10;   // head forward
+  rolled[LM.leftShoulder].x += 0.07;                          // shoulders forward
+  const hi = hunchIndex(assessSide(buildLms(rolled, PORTRAIT), WORLD_SIDE, 1080, 1920,
+                                   { kyphosis: 0.16, lordosis: 0.05 }));
+  check('hunch: a rounded side view reads high', hi > 70, String(hi));
+
+  check('hunch: rises with the roll', hi > hunchIndex(flat));
+  check('hunch: null without a sagittal view', hunchIndex([]) === null);
+  check('hunch: ignores checkpoints unrelated to the pattern',
+        hunchIndex([{ name: 'PLUMB LINE', severity: 1, weight: 1 }]) === null);
+  check('hunch: stays within 0-100', hi >= 0 && hi <= 100, String(hi));
+  check('hunch band: reads as a label at both ends',
+        hunchBand(5).label === 'STACKED' && hunchBand(95).label === 'EXTREME ROLL');
 }
 
 /* ============================================================ */
