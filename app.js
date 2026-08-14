@@ -24,6 +24,9 @@ const APPSTORE_URL = 'https://apps.apple.com/us/app/kina-pt/id6755166316';
 // the share card, and in the copied caption, so it survives every route out.
 const CHALLENGE_TAG = '#posturechallenge';
 
+// Seconds on the live-camera timer.
+const CAPTURE_COUNTDOWN = 7;
+
 /* ---------- custom media ----------
    Drop files into /assets and point these at them. Each one is optional:
    while it's null the app uses its built-in fallback (the procedural KINA
@@ -800,11 +803,14 @@ async function buildEnvelope(node, file) {
     lastFrameAt = now;
   }
 
-  const BLUE = '36,221,221';
-  const HOT = '168,245,245';
+  /* Palette. A build can override it before this module loads — see
+     tools/build-brand.js, which generates the KinaPT-coloured copy. */
+  const P = window.KINA_PALETTE || {};
+  const BLUE = P.blue || '36,221,221';
+  const HOT = P.hot || '168,245,245';
   // Accents sampled from the reference frames (see palette note in index.html).
-  const GOLD = '241,220,42';
-  const MAGENTA = '252,64,201';
+  const GOLD = P.gold || '241,220,42';
+  const MAGENTA = P.magenta || '252,64,201';
 
   const arc = (cx, cy, r, from, to, w, alpha, col = BLUE) => {
     ctx.beginPath();
@@ -1398,7 +1404,21 @@ function pickVoice() {
 }
 if ('speechSynthesis' in window) { pickVoice(); speechSynthesis.onvoiceschanged = pickVoice; }
 
+/* KINA is the only thing that speaks.
+
+   Everything below used to fall back to the browser's built-in voice when a
+   recording was missing — a different speaker, mid-flow, reading out "three,
+   two, one" and "frontal image acquired". Two voices is worse than one voice
+   and some silence, so the fallback is off. Lines without a recording simply do
+   not get spoken; every one of them is already on screen as text.
+
+   Turn this back on only if the synthetic voice is ever wanted again. Recording
+   the missing lines in KINA's own voice is the better fix — see
+   docs/voiceover-scripts.md. */
+const SYNTHETIC_VOICE = false;
+
 function say(text) {
+  if (!SYNTHETIC_VOICE) return;
   if (!voiceOn || !('speechSynthesis' in window)) return;
   try {
     const u = new SpeechSynthesisUtterance(text);
@@ -1503,6 +1523,9 @@ const VO_MS_PER_CHAR = 55;
 function playVO(key) {
   const spec = VO_LINES[key];
   if (!spec) return Promise.resolve();
+  // No recording and no synthetic voice means nothing to say and nothing to
+  // caption — the capture screens already carry these words on screen.
+  if (!spec.file && !SYNTHETIC_VOICE) return Promise.resolve();
 
   const cap = $('vo-caption');
   const stage = $('kina-stage');
@@ -1635,6 +1658,7 @@ let voCancel = null;
 
 /** Speech-synthesis reading of the same script, chunk by chunk. */
 function speakLines(lines, onChunk) {
+  if (!SYNTHETIC_VOICE) return Promise.resolve();
   if (!voiceOn || !('speechSynthesis' in window)) return Promise.resolve();
   stopCueFile();        // one stream: the voice takes it back
   return new Promise((resolve) => {
@@ -1984,7 +2008,13 @@ $('btn-snap').addEventListener('click', async () => {
   $('btn-cancel-cam').classList.add('hidden');
   const cd = $('countdown');
   cd.style.display = 'flex';
-  for (const n of ['3', '2', '1']) { cd.textContent = n; say(n); await sleep(900); }
+  // Seven seconds: long enough to put the phone down, step back and settle into
+  // a normal stance, which is the pose the scan is supposed to be reading.
+  for (let n = CAPTURE_COUNTDOWN; n >= 1; n--) {
+    cd.textContent = String(n);
+    sfx('blip', 0.25);          // a tick, not a voice
+    await sleep(1000);
+  }
   cd.style.display = 'none';
   const c = document.createElement('canvas');
   c.width = video.videoWidth; c.height = video.videoHeight;

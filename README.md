@@ -149,6 +149,22 @@ and a web URL if the app's scheme does not resolve.
 copied caption, and spoken by KINA, so it survives whichever route out the user
 takes — including the one where they just screenshot the page.
 
+## Colour variants
+
+`brand.html` is the same app in KinaPT's palette, generated rather than forked:
+
+```bash
+node tools/build-brand.js
+```
+
+It rewrites index.html's `:root` block and injects a canvas palette before the
+module loads, so the two builds cannot drift — rerun it after any change to
+index.html. The interface stays dark in both: the bloom pass composites with
+`lighter`, so every glow depends on a dark ground, and moving the HUD onto the
+brand's cream would mean a different renderer rather than a recolour. The brand
+hue also had to gain chroma on the way in; the app's sage is pale enough that
+additive bloom washes it to white, taking the brand with it.
+
 ## Tests
 
 ```bash
