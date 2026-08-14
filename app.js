@@ -472,20 +472,25 @@ const SFX = {
      centroid ~2.4 kHz, zero energy below 300 Hz, sparse with 37% near-silence.
      So it's all shimmer and air — deliberately no sub, unlike the ambient bed. */
   systemLoading: () => {
+    /* Levels set by measurement rather than ear, since I cannot hear it: the
+       rendered cue is matched to the voiceover's own loudness while sounding
+       (-18 dBFS), where it previously sat 10 dB below KINA and disappeared
+       against a phone speaker. Peak is checked against the decoded file so the
+       gain cannot quietly turn into clipping. */
     // rising shimmer, the spine of the cue
-    noise(1.5, 700, 6200, 0.055);
-    noise(0.8, 3000, 1200, 0.030);                 // counter-sweep for movement
+    noise(1.5, 700, 6200, 0.74);
+    noise(0.8, 3000, 1200, 0.42);                  // counter-sweep for movement
     // spin-up tones, high and thin
-    tone(880, 1760, 1.3, { type: 'sine', gain: 0.045 });
-    tone(1320, 2640, 1.3, { type: 'sine', gain: 0.022, delay: 0.15 });
+    tone(880, 1760, 1.3, { type: 'sine', gain: 0.65 });
+    tone(1320, 2640, 1.3, { type: 'sine', gain: 0.32, delay: 0.15 });
     // sparse telemetry, scattered rather than rhythmic
     [0.10, 0.32, 0.50, 0.76, 1.0, 1.24].forEach((d, i) =>
       tone(1600 + (i % 3) * 620, 0, 0.045,
-           { type: 'triangle', gain: 0.035, delay: d }));
+           { type: 'triangle', gain: 0.51, delay: d }));
     // resolve: a two-note chime as the core settles, timed to land just as
     // KINA takes over — the silence between them was the awkward part
-    tone(2093, 2093, 0.45, { type: 'sine', gain: 0.05, delay: 1.35 });
-    tone(3136, 3136, 0.55, { type: 'sine', gain: 0.038, delay: 1.5 });
+    tone(2093, 2093, 0.45, { type: 'sine', gain: 0.74, delay: 1.35 });
+    tone(3136, 3136, 0.55, { type: 'sine', gain: 0.55, delay: 1.5 });
   },
 
   // boot cues
@@ -1559,10 +1564,12 @@ function playVO(key) {
       // muted screen wondering whether they broke it.
       audio.addEventListener('playing', () => {
         $('kina-status').textContent = '◈ KINA SPEAKING';
+        $('kina-status').classList.remove('alert');   // audio arrived after all
       }, { once: true });
       setTimeout(() => {
         if (!audioLive && !cancelled) {
           $('kina-status').textContent = '◈ NO AUDIO — CHECK VOLUME / TAP SKIP';
+          $('kina-status').classList.add('alert');
         }
       }, 2500);
       audio.addEventListener('playing', onPlaying, { once: true });
@@ -2426,6 +2433,7 @@ if (['localhost', '127.0.0.1'].includes(location.hostname)) {
     boot: () => ({ running: bootRunning, done: bootDone }),
     warmDetector,
     spectrum: () => lastSpec,
+    cueURL,
     amps: () => lastAmps,
     audio: () => ({
       energy: coreEnergy,

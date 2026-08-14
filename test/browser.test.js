@@ -165,8 +165,12 @@ const skip = (section) => {
   // The loading cue holds this gap. It used to run a second longer than it
   // needed to, which read on the phone as the app having stalled.
   await page.waitForTimeout(1100);
-  check('loading state shown before the voiceover', await page.evaluate(() =>
+  // The corner readout is no longer on screen — it only surfaces to warn that
+  // audio failed to start. The state behind it still has to be right.
+  check('loading state tracked before the voiceover', await page.evaluate(() =>
     document.getElementById('kina-status').textContent.includes('LOADING')));
+  check('corner status stays out of sight', await page.evaluate(() =>
+    getComputedStyle(document.getElementById('kina-status')).display === 'none'));
   await page.waitForFunction(() => {
     const a = window.__scan.audio();
     return a.t !== null && a.t > 0.05;
@@ -208,6 +212,8 @@ const skip = (section) => {
         (await page.textContent('#vo-caption')).trim().length > 10,
         await page.textContent('#vo-caption'));
   check('caption track visible', (await page.getAttribute('#vo-caption', 'class') || '').includes('on'));
+  check('corner stays clear while KINA speaks', await page.evaluate(() =>
+    getComputedStyle(document.getElementById('kina-status')).display === 'none'));
   check('core pulses while speaking',
         (await page.getAttribute('#kina-stage', 'class') || '').includes('speaking'));
   await page.click('#btn-skip-vo');

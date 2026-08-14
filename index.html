@@ -194,13 +194,20 @@
       repeating-linear-gradient(180deg, rgba(36,221,221,0.06) 0 1px, transparent 1px 3px),
       radial-gradient(ellipse at center, transparent 45%, rgba(4,8,15,0.75) 100%);
   }
+  /* The running commentary is gone from the corner — it was clutter over the
+     animation. The element stays for one job: warning the user when the audio
+     silently fails to start, which is worth interrupting for. */
   #kina-status {
+    display: none;
     position: absolute; left: 10px; z-index: 4;
     bottom: calc(9px + env(safe-area-inset-bottom));
     font-family: monospace; font-size: 9.5px; letter-spacing: 2px;
     color: var(--cyan); text-shadow: 0 0 8px var(--cyan-dim);
   }
-  #kina-stage.speaking #kina-status { animation: pulseDim 1.1s ease-in-out infinite; }
+  #kina-status.alert {
+    display: block; color: var(--orange);
+    text-shadow: 0 0 8px rgba(255,179,71,0.5);
+  }
   @keyframes pulseDim { 50% { opacity: 0.35; } }
 
   /* Short screens — most phones once the browser chrome is showing. Trim the
@@ -415,7 +422,7 @@
   <video id="kina-loop" loop muted playsinline autoplay preload="auto"></video>
   <canvas id="kina-core"></canvas>
   <div id="kina-scanlines"></div>
-  <div id="kina-status">◈ SOUND ON RECOMMENDED</div>
+  <div id="kina-status"></div>
 </div>
 
 <div id="app">
