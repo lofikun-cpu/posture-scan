@@ -3,9 +3,9 @@
 A "Jarvis"-style HUD web app. The user takes **two photos** (front and side),
 an on-device AI grades their alignment across 12 biomechanical checkpoints,
 delivers a score out of 100 with a synthesized voice, reports **how far each
-checkpoint sits from ideal in inches**, headlines a **forward-roll percentage**
-for the upper body, generates a shareable score card, and deep-links to
-**KinaPT** on the App Store.
+checkpoint sits from ideal in inches**, headlines a **hunchback risk
+percentage**, copies a shareable score card straight to the clipboard for
+Instagram or TikTok, and deep-links to **KinaPT** on the App Store.
 
 No backend. No API keys. No per-user cost.
 
@@ -117,18 +117,31 @@ figures are rounded to a tenth of an inch, labelled as estimates in the UI, and
 suppressed entirely (falling back to angles and percentages) when the fitted
 torso lands outside 20–80 cm, which means the fit has failed.
 
-## Forward-roll index
+## Hunchback risk
 
-One headline percentage for the pattern people recognise in the mirror: a
-weighted read of the thoracic curve, the head carried ahead of the shoulders,
-and the shoulders ahead of the hips. 0% is a stacked upper body, 100% the far
-end of what the scan resolves. It is a posture measurement and is not presented
-as a diagnosis — hyperkyphosis is a clinical finding that needs a clinician.
+One headline percentage, on the same ring as the score because it is read the
+same way: a weighted measure of the thoracic curve, the head carried ahead of
+the shoulders, and the shoulders ahead of the hips. 0% is a stacked upper body,
+100% the far end of what the scan resolves.
+
+What it is and is not: a measurement of how far the pattern has already
+progressed **today**, scaled 0-100. It is not an epidemiological probability
+and not a diagnosis — hyperkyphosis is a clinical finding that needs a
+clinician and imaging — and the results screen says so in as many words.
+
+## Sharing
+
+Neither Instagram nor TikTok accepts a pre-filled post from the web; no URL
+opens a composer with an image attached. So the flow is the two-step one that
+actually works: the card and caption go to the clipboard in one tap, then
+buttons open Instagram or TikTok to paste into. Every leg has a fallback —
+text-only if the clipboard refuses images, a file download if it refuses both,
+and a web URL if the app's scheme does not resolve.
 
 ## Tests
 
 ```bash
-node test/posture.test.mjs     # 63 checks, no dependencies
+node test/posture.test.mjs     # 64 checks, no dependencies
 ```
 
 Covers the full analysis engine: perfect-posture baselines, aspect-ratio

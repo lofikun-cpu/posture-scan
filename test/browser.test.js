@@ -26,6 +26,8 @@ const skip = (section) => {
            '--autoplay-policy=no-user-gesture-required']
   });
   const page = await browser.newPage({ viewport: { width: 420, height: 900 } });
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'],
+                                        { origin: 'http://localhost:8899' });
   const errors = [];
   // Location included so a 404 can be attributed — the fixture probe below
   // deliberately requests a file that may not exist.
@@ -344,9 +346,9 @@ const skip = (section) => {
   check('every checkpoint reports a figure', meas.withDetail === meas.rows,
         `${meas.withDetail}/${meas.rows}`);
   check('at least some are real distances', meas.inches > 0, JSON.stringify(meas.sample));
-  check('forward-roll index shown', meas.hunchShown, JSON.stringify(meas));
-  check('forward-roll index is a percentage', /^\d+%$/.test(meas.hunchNum), meas.hunchNum);
-  check('forward-roll index carries a label', meas.hunchLabel.length > 3, meas.hunchLabel);
+  check('hunchback risk shown', meas.hunchShown, JSON.stringify(meas));
+  check('hunchback risk is a percentage', /^\d+%$/.test(meas.hunchNum), meas.hunchNum);
+  check('hunchback risk carries a band label', meas.hunchLabel.length > 3, meas.hunchLabel);
   check('the drag-to-perfect simulation is gone', await page.evaluate(() =>
     !document.getElementById('slider-range') && !document.getElementById('after-canvas')));
 
@@ -356,6 +358,40 @@ const skip = (section) => {
   check('CTA points at the real KinaPT listing',
         /apps\.apple\.com\/us\/app\/kina-pt\/id6755166316/.test(cta), cta);
   check('CTA carries scan attribution', /ct=posture-scan/.test(cta) && /score=/.test(cta), cta);
+
+  console.log('\n── Copy-and-post share flow');
+  check('apps are hidden until the card is copied', await page.evaluate(() =>
+    document.getElementById('share-apps').classList.contains('hidden')));
+  await page.click('#btn-share');
+  await page.waitForTimeout(900);
+  const shared = await page.evaluate(async () => {
+    const out = { status: document.getElementById('share-status').textContent,
+                  appsShown: !document.getElementById('share-apps').classList.contains('hidden'),
+                  ig: !!document.getElementById('btn-ig'),
+                  tt: !!document.getElementById('btn-tt') };
+    try {
+      const items = await navigator.clipboard.read();
+      out.types = items.flatMap(i => i.types);
+      const t = items.find(i => i.types.includes('text/plain'));
+      if (t) out.text = await (await t.getType('text/plain')).text();
+      const img = items.find(i => i.types.includes('image/png'));
+      if (img) out.imageBytes = (await (await img.getType('image/png')).arrayBuffer()).byteLength;
+    } catch (e) { out.readErr = String(e); }
+    return out;
+  });
+  console.log('    ', shared.status);
+  console.log('     clipboard:', JSON.stringify(shared.types), `${shared.imageBytes || 0} bytes`);
+  check('the card image lands on the clipboard',
+        (shared.types || []).includes('image/png') && shared.imageBytes > 5000,
+        JSON.stringify(shared));
+  check('the caption lands on the clipboard',
+        (shared.types || []).includes('text/plain'), JSON.stringify(shared.types));
+  check('caption carries the score', /\b63\/100\b/.test(shared.text || ''), shared.text);
+  check('caption carries the risk figure', /Hunchback risk: 58%/.test(shared.text || ''), shared.text);
+  check('caption carries the scan link', /posture-scan|localhost/.test(shared.text || ''), shared.text);
+  check('the user is told what happened', /copied/i.test(shared.status), shared.status);
+  check('Instagram and TikTok appear after copying',
+        shared.appsShown && shared.ig && shared.tt, JSON.stringify(shared));
 
   console.log('\n── Share card');
   const card = await page.evaluate(() => {

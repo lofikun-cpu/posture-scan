@@ -377,15 +377,18 @@ export function assessSide(lms, world, imgW, imgH, contour) {
    HUNCH INDEX
 
    One number for the thing people actually recognise in the mirror: how far
-   the upper body has rolled forward. It is a weighted read of the three
-   sagittal checkpoints that make up that pattern — the thoracic curve itself,
+   the upper body has already rolled forward, presented as how far along the
+   road to a rounded back the person is. It is a weighted read of the three
+   sagittal checkpoints that make up the pattern — the thoracic curve itself,
    the head carried ahead of the shoulders, and the shoulders ahead of the
-   hips — expressed as a percentage of the way from square to fully rounded.
+   hips. 0% is a stacked, neutral upper body; 100% is the far end of what this
+   scan can resolve.
 
-   It is a posture measurement, not a diagnosis: hyperkyphosis is a clinical
-   finding that needs a clinician and an X-ray, and nothing here is either.
-   0% is a stacked, neutral upper body; 100% is the far end of what this scan
-   can resolve.
+   Read what it is: a measurement of a posture pattern TODAY, scaled 0-100.
+   It is not an epidemiological probability and not a diagnosis — hyperkyphosis
+   is a clinical finding that needs a clinician and imaging. The screen says so
+   in as many words, which is both honest and what keeps the app on the right
+   side of health-claim rules.
    ============================================================ */
 const HUNCH_PARTS = {
   'THORACIC CURVE': 3,
@@ -407,11 +410,26 @@ export function hunchIndex(sideMetrics) {
 }
 
 export function hunchBand(pct) {
-  if (pct < 15) return { label: 'STACKED', note: 'Your upper body sits square over your hips.' };
-  if (pct < 35) return { label: 'SLIGHT ROLL', note: 'A mild forward roll — the early desk-work pattern.' };
-  if (pct < 60) return { label: 'ROUNDED', note: 'A clear rounded-forward pattern through the upper back.' };
-  if (pct < 80) return { label: 'HEAVILY ROUNDED', note: 'Your upper back and head carry well forward of neutral.' };
-  return { label: 'EXTREME ROLL', note: 'At the far end of what this scan can measure. Worth a professional look.' };
+  if (pct < 15) return {
+    label: 'LOW RISK',
+    note: 'Your upper body stacks square over your hips. Keep it there.'
+  };
+  if (pct < 35) return {
+    label: 'EARLY WARNING',
+    note: 'A mild forward roll has started — the classic desk-work opening move.'
+  };
+  if (pct < 60) return {
+    label: 'ON THE WAY',
+    note: 'A clear rounded-forward pattern is already set through your upper back.'
+  };
+  if (pct < 80) return {
+    label: 'HIGH RISK',
+    note: 'Your head and upper back carry well forward of neutral. This one compounds.'
+  };
+  return {
+    label: 'SEVERE',
+    note: 'At the far end of what this scan can measure. Worth a professional look.'
+  };
 }
 
 /* ---------- scoring ---------- */

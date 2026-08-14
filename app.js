@@ -2166,7 +2166,10 @@ function metricRow(m) {
   return row;
 }
 
-/* ---------- hunch index ---------- */
+/* ---------- hunchback risk ----------
+   Same ring, same count-up as the score, because it is read the same way. The
+   colour runs the other direction: on the score a full ring is good, here a
+   full ring is the thing to avoid. */
 function showHunch(result) {
   const box = $('hunch-box');
   if (result.hunch === null || result.hunch === undefined) {
@@ -2174,20 +2177,26 @@ function showHunch(result) {
     return;
   }
   box.classList.remove('hidden');
-  const band = hunchBand(result.hunch);
+  const pct = result.hunch;
+  const band = hunchBand(pct);
   $('hunch-label').textContent = band.label;
   $('hunch-note').textContent = band.note;
-  const bar = $('hunch-fill');
-  bar.style.width = '0%';
-  bar.className = 'hunch-fill ' + (result.hunch < 35 ? 'good' : result.hunch < 60 ? 'warn' : 'bad');
+
+  const CIRC = 2 * Math.PI * 86;
+  const ring = $('hunch-fg');
+  ring.style.strokeDasharray = CIRC;
+  ring.style.strokeDashoffset = CIRC;
+  ring.style.stroke = pct < 15 ? 'var(--green)' : pct < 35 ? 'var(--cyan)'
+                    : pct < 60 ? 'var(--orange)' : 'var(--red)';
   requestAnimationFrame(() => requestAnimationFrame(() => {
-    bar.style.width = result.hunch + '%';
+    ring.style.strokeDashoffset = CIRC * (1 - pct / 100);
   }));
+
   const num = $('hunch-num');
   const t0 = performance.now();
   (function count() {
     const pr = Math.min(1, (performance.now() - t0) / 1600);
-    num.textContent = Math.round(result.hunch * (1 - Math.pow(1 - pr, 3))) + '%';
+    num.textContent = Math.round(pct * (1 - Math.pow(1 - pr, 3))) + '%';
     if (pr < 1) requestAnimationFrame(count);
   })();
 }
@@ -2240,7 +2249,7 @@ function revealScore(result) {
   showHunch(result);
   const hp = result.hunch;
   say(v.voice + (hp === null ? '' :
-      ` Your upper body is ${hp} percent of the way to a fully rounded posture.`) +
+      ` Hunchback risk: ${hp} percent.`) +
       ' To correct these deviations, I recommend the Kina P T protocol.');
 }
 
@@ -2288,7 +2297,7 @@ function buildShareCard(result) {
     ctx.fillRect(100, y - 46, W - 200, 96);
     ctx.textAlign = 'left';
     ctx.fillStyle = '#7fb2c6'; ctx.font = '26px monospace';
-    ctx.fillText('FORWARD ROLL · UPPER BODY', 128, y - 8);
+    ctx.fillText('HUNCHBACK RISK', 128, y - 8);
     ctx.fillStyle = '#b8dced'; ctx.font = '28px monospace';
     ctx.fillText(hunchBand(result.hunch).label, 128, y + 32);
     ctx.textAlign = 'right';
@@ -2326,42 +2335,117 @@ function buildShareCard(result) {
   return c;
 }
 
+/* ---------- share ----------
+   Copy the card and the caption, then hand off to the app they will post from.
+
+   Neither Instagram nor TikTok accepts a pre-filled post from the web — there
+   is no URL that opens a composer with an image attached, and anything claiming
+   otherwise is a scheme that stopped working years ago. So the honest flow is
+   the two-step one: put the picture and the words on the clipboard, then open
+   the app so they paste. Everything that can fail here has a fallback, because
+   clipboard image support is the least uniform API in the browser.
+
+   Order matters on iOS: the clipboard write has to be issued inside the tap,
+   and Safari only accepts a ClipboardItem whose blob is a promise handed over
+   synchronously — awaiting the blob first loses user activation and the write
+   is rejected. */
 let sharing = false;
+
+const SHARE_APPS = {
+  instagram: { name: 'Instagram', app: 'instagram://camera', web: 'https://www.instagram.com/' },
+  tiktok:    { name: 'TikTok',    app: 'snssdk1233://studio/create', web: 'https://www.tiktok.com/upload' }
+};
+
+function shareCaption(result) {
+  const risk = (result.hunch === null || result.hunch === undefined)
+    ? '' : ` Hunchback risk: ${result.hunch}%.`;
+  return `KINA scanned my posture from both angles: ${result.score}/100.${risk} ` +
+         `Scan yours: ${APP_URL}`;
+}
+
+function shareStatus(msg, tone = '') {
+  const el = $('share-status');
+  el.textContent = msg;
+  el.className = 'share-status ' + tone;
+}
+
+/** Save the card as a file — the fallback wherever the clipboard refuses images. */
+function downloadCard(blob) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'posture-score.png';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
 $('btn-share').addEventListener('click', async () => {
   if (!lastResult || sharing) return;
   sharing = true;
   $('btn-share').disabled = true;
-  try {
-    const card = buildShareCard(lastResult);
-    const shareText = `KINA scanned my posture from both angles: ${lastResult.score}/100 😳 Can you beat my score?`;
-    const blob = await new Promise(r => card.toBlob(r, 'image/png'));
-    const file = blob && new File([blob], 'posture-score.png', { type: 'image/png' });
+  sfx('lock', 0.5);
 
-    if (navigator.share) {
-      // Transient failures (sheet already open, lost activation) are no-ops —
-      // never fall through to the desktop path on a device with a share sheet.
-      try {
-        if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
-          await navigator.share({ files: [file], text: shareText, title: 'My Posture Score' });
-        } else {
-          await navigator.share({ text: shareText + ' ' + APP_URL, title: 'My Posture Score' });
-        }
-      } catch (e) { /* AbortError / NotAllowedError / InvalidStateError */ }
-      return;
+  const card = buildShareCard(lastResult);
+  const text = shareCaption(lastResult);
+  const blobPromise = new Promise(r => card.toBlob(r, 'image/png'));
+
+  let copiedImage = false, copiedText = false;
+  try {
+    if (navigator.clipboard && window.ClipboardItem) {
+      // Constructed synchronously with the pending blob — see the note above.
+      await navigator.clipboard.write([new ClipboardItem({
+        'image/png': blobPromise.then(b => b || new Blob([], { type: 'image/png' })),
+        'text/plain': new Blob([text], { type: 'text/plain' })
+      })]);
+      copiedImage = true; copiedText = true;
     }
-    if (blob) {
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = 'posture-score.png';
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-    }
-    window.open('https://twitter.com/intent/tweet?text=' + encodeURIComponent(shareText + ' ' + APP_URL), '_blank');
-  } finally {
-    sharing = false;
-    $('btn-share').disabled = false;
+  } catch (e) { /* fall through to text-only, then to a download */ }
+
+  if (!copiedImage) {
+    try {
+      await navigator.clipboard.writeText(text);
+      copiedText = true;
+    } catch (e) { /* nothing copyable — the download below still works */ }
   }
+
+  const blob = await blobPromise;
+  if (!copiedImage && blob) downloadCard(blob);
+
+  shareStatus(
+    copiedImage ? '✓ Score card and caption copied — paste it in your post'
+    : copiedText ? '✓ Caption copied · card saved to your files — attach it in your post'
+    : '✓ Card saved to your files — attach it in your post',
+    'ok');
+  $('share-apps').classList.remove('hidden');
+  $('btn-save-card').classList.toggle('hidden', !copiedImage || !blob);
+  lastCardBlob = blob;
+
+  sharing = false;
+  $('btn-share').disabled = false;
 });
+
+let lastCardBlob = null;
+
+$('btn-save-card').addEventListener('click', () => {
+  if (lastCardBlob) downloadCard(lastCardBlob);
+});
+
+/* Try the installed app first and fall back to the web. There is no reliable
+   way to detect whether an app is installed, so the pattern is: attempt the
+   scheme, and if the page is still here a moment later, open the site instead.
+   A page that actually switched apps gets suspended and never runs the timer. */
+function openShareApp(key) {
+  const target = SHARE_APPS[key];
+  if (!target) return;
+  const web = window.open(target.web, '_blank', 'noopener');
+  // Desktop has no app to open, and a scheme there just errors.
+  if (!IS_IOS && !/Android/i.test(navigator.userAgent)) return;
+  if (web) return;                       // popup blocked is the common case
+  location.href = target.app;
+  setTimeout(() => { location.href = target.web; }, 900);
+}
+
+$('btn-ig').addEventListener('click', () => { sfx('tap', 0.3); openShareApp('instagram'); });
+$('btn-tt').addEventListener('click', () => { sfx('tap', 0.3); openShareApp('tiktok'); });
 
 /* ---------- retry ---------- */
 $('btn-retry').addEventListener('click', () => {

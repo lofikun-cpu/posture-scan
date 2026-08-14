@@ -436,8 +436,13 @@ section('Hunch index');
   check('hunch: ignores checkpoints unrelated to the pattern',
         hunchIndex([{ name: 'PLUMB LINE', severity: 1, weight: 1 }]) === null);
   check('hunch: stays within 0-100', hi >= 0 && hi <= 100, String(hi));
-  check('hunch band: reads as a label at both ends',
-        hunchBand(5).label === 'STACKED' && hunchBand(95).label === 'EXTREME ROLL');
+  check('hunch band: reads as a risk level at both ends',
+        hunchBand(5).label === 'LOW RISK' && hunchBand(95).label === 'SEVERE',
+        `${hunchBand(5).label} / ${hunchBand(95).label}`);
+  check('hunch band: rises monotonically through the range',
+        ['LOW RISK', 'EARLY WARNING', 'ON THE WAY', 'HIGH RISK', 'SEVERE']
+          .every((l, i) => hunchBand([5, 25, 45, 70, 95][i]).label === l),
+        [5, 25, 45, 70, 95].map(v => hunchBand(v).label).join(' → '));
 }
 
 /* ============================================================ */
