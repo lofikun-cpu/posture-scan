@@ -11,7 +11,7 @@ import {
   LM, SEV_LABELS, sevBucket, clamp,
   checkQuality, analyseBackContour,
   assessFront, assessSide, scoreOf, verdictFor,
-  hunchIndex, hunchBand
+  hunchIndex, hunchBand, HUNCH_EXPLAINER
 } from './posture.js';
 
 /* ---------- configuration ---------- */
@@ -19,6 +19,10 @@ import {
 // TODO: replace with the real KinaPT App Store listing before launch.
 // Format: https://apps.apple.com/app/id<APP_ID>
 const APPSTORE_URL = 'https://apps.apple.com/us/app/kina-pt/id6755166316';
+
+// The hashtag the whole loop hangs on: it is on the results screen, burned into
+// the share card, and in the copied caption, so it survives every route out.
+const CHALLENGE_TAG = '#posturechallenge';
 
 /* ---------- custom media ----------
    Drop files into /assets and point these at them. Each one is optional:
@@ -2199,6 +2203,7 @@ function showHunch(result) {
   const band = hunchBand(pct);
   $('hunch-label').textContent = band.label;
   $('hunch-note').textContent = band.note;
+  $('hunch-explain').textContent = HUNCH_EXPLAINER;
 
   const CIRC = 2 * Math.PI * 86;
   const ring = $('hunch-fg');
@@ -2267,7 +2272,8 @@ function revealScore(result) {
   showHunch(result);
   const hp = result.hunch;
   say(v.voice + (hp === null ? '' :
-      ` Hunchback risk: ${hp} percent.`) +
+      ` You are ${hp} percent of the way to a hunched back.`) +
+      ' Screenshot this and post it with hashtag posture challenge.' +
       ' To correct these deviations, I recommend the Kina P T protocol.');
 }
 
@@ -2346,10 +2352,12 @@ function buildShareCard(result) {
   }
 
   ctx.textAlign = 'center';
-  ctx.fillStyle = '#24dddd'; ctx.font = '600 36px monospace';
-  ctx.fillText('Can you beat my score?', W / 2, H - 128);
-  ctx.fillStyle = '#7fb2c6'; ctx.font = '29px monospace';
-  ctx.fillText(APP_URL.replace(/^https?:\/\//, ''), W / 2, H - 78);
+  ctx.fillStyle = '#24dddd'; ctx.font = '700 40px monospace';
+  ctx.fillText(CHALLENGE_TAG, W / 2, H - 132);
+  ctx.fillStyle = '#fff'; ctx.font = '600 30px monospace';
+  ctx.fillText('Can you beat my score?', W / 2, H - 90);
+  ctx.fillStyle = '#7fb2c6'; ctx.font = '27px monospace';
+  ctx.fillText(APP_URL.replace(/^https?:\/\//, ''), W / 2, H - 50);
   return c;
 }
 
@@ -2376,9 +2384,9 @@ const SHARE_APPS = {
 
 function shareCaption(result) {
   const risk = (result.hunch === null || result.hunch === undefined)
-    ? '' : ` Hunchback risk: ${result.hunch}%.`;
-  return `KINA scanned my posture from both angles: ${result.score}/100.${risk} ` +
-         `Scan yours: ${APP_URL}`;
+    ? '' : ` I'm ${result.hunch}% of the way to a hunchback 😳`;
+  return `KINA scanned my posture from both angles: ${result.score}/100.${risk}\n` +
+         `Scan yours: ${APP_URL}\n${CHALLENGE_TAG}`;
 }
 
 function shareStatus(msg, tone = '') {
@@ -2429,7 +2437,7 @@ $('btn-share').addEventListener('click', async () => {
   if (!copiedImage && blob) downloadCard(blob);
 
   shareStatus(
-    copiedImage ? '✓ Score card and caption copied — paste it in your post'
+    copiedImage ? '✓ Card and caption copied — paste it in your post with #posturechallenge'
     : copiedText ? '✓ Caption copied · card saved to your files — attach it in your post'
     : '✓ Card saved to your files — attach it in your post',
     'ok');

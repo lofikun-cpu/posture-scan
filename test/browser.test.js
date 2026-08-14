@@ -340,7 +340,10 @@ const skip = (section) => {
       sample: details.filter(Boolean).slice(0, 4),
       hunchShown: !hb.classList.contains('hidden'),
       hunchNum: document.getElementById('hunch-num').textContent,
-      hunchLabel: document.getElementById('hunch-label').textContent
+      hunchLabel: document.getElementById('hunch-label').textContent,
+      hunchNote: document.getElementById('hunch-note').textContent,
+      hunchExplain: document.getElementById('hunch-explain').textContent,
+      challenge: document.getElementById('challenge-box').textContent
     };
   });
   console.log('    ', JSON.stringify(meas.sample), meas.hunchNum, meas.hunchLabel);
@@ -350,6 +353,14 @@ const skip = (section) => {
   check('hunchback risk shown', meas.hunchShown, JSON.stringify(meas));
   check('hunchback risk is a percentage', /^\d+%$/.test(meas.hunchNum), meas.hunchNum);
   check('hunchback risk carries a band label', meas.hunchLabel.length > 3, meas.hunchLabel);
+  check('the percentage is explained in plain words',
+        /% of the way to a hunched back/.test(meas.hunchNote), meas.hunchNote);
+  check('and the rule behind it is stated',
+        /higher the percentage/i.test(meas.hunchExplain) && /chance/i.test(meas.hunchExplain),
+        meas.hunchExplain);
+  check('the challenge call-to-action is on screen',
+        /screenshot/i.test(meas.challenge) && meas.challenge.includes('#posturechallenge'),
+        meas.challenge);
   check('the drag-to-perfect simulation is gone', await page.evaluate(() =>
     !document.getElementById('slider-range') && !document.getElementById('after-canvas')));
 
@@ -388,7 +399,8 @@ const skip = (section) => {
   check('the caption lands on the clipboard',
         (shared.types || []).includes('text/plain'), JSON.stringify(shared.types));
   check('caption carries the score', /\b63\/100\b/.test(shared.text || ''), shared.text);
-  check('caption carries the risk figure', /Hunchback risk: 58%/.test(shared.text || ''), shared.text);
+  check('caption carries the risk figure', /58% of the way to a hunchback/.test(shared.text || ''), shared.text);
+  check('caption carries the hashtag', /#posturechallenge/.test(shared.text || ''), shared.text);
   check('caption carries the scan link', /posture-scan|localhost/.test(shared.text || ''), shared.text);
   check('the user is told what happened', /copied/i.test(shared.status), shared.status);
   check('Instagram and TikTok appear after copying',

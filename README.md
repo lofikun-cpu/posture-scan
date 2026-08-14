@@ -124,10 +124,17 @@ same way: a weighted measure of the thoracic curve, the head carried ahead of
 the shoulders, and the shoulders ahead of the hips. 0% is a stacked upper body,
 100% the far end of what the scan resolves.
 
-What it is and is not: a measurement of how far the pattern has already
-progressed **today**, scaled 0-100. It is not an epidemiological probability
-and not a diagnosis — hyperkyphosis is a clinical finding that needs a
-clinician and imaging — and the results screen says so in as many words.
+The screen states the rule in plain words: the higher the percentage, the
+further the upper back has already rolled toward a permanent hunch, and the
+higher the chance of ending up there if nothing changes. That is a statement
+about direction, which the measurement supports.
+
+What it deliberately does not say is "you have an N% chance of becoming a
+hunchback". Nobody has run the cohort study that would license that sentence,
+and inventing the probability would be the one thing in this app that is not
+real. The number is unchanged and still headlines the screen; only the claim
+attached to it is bounded. Hyperkyphosis is a clinical finding that needs a
+clinician and imaging, and the results screen says so.
 
 ## Sharing
 
@@ -137,6 +144,10 @@ actually works: the card and caption go to the clipboard in one tap, then
 buttons open Instagram or TikTok to paste into. Every leg has a fallback —
 text-only if the clipboard refuses images, a file download if it refuses both,
 and a web URL if the app's scheme does not resolve.
+
+`#posturechallenge` is on the results screen, burned into the share card, in the
+copied caption, and spoken by KINA, so it survives whichever route out the user
+takes — including the one where they just screenshot the page.
 
 ## Tests
 

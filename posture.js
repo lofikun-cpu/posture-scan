@@ -412,25 +412,34 @@ export function hunchIndex(sideMetrics) {
 export function hunchBand(pct) {
   if (pct < 15) return {
     label: 'LOW RISK',
-    note: 'Your upper body stacks square over your hips. Keep it there.'
+    note: `You are ${pct}% of the way to a hunched back. Barely started — keep it there.`
   };
   if (pct < 35) return {
     label: 'EARLY WARNING',
-    note: 'A mild forward roll has started — the classic desk-work opening move.'
+    note: `You are ${pct}% of the way to a hunched back. The forward roll has begun — ` +
+          'the classic desk-work opening move.'
   };
   if (pct < 60) return {
     label: 'ON THE WAY',
-    note: 'A clear rounded-forward pattern is already set through your upper back.'
+    note: `You are ${pct}% of the way to a hunched back. The rounded pattern is already ` +
+          'set through your upper back.'
   };
   if (pct < 80) return {
     label: 'HIGH RISK',
-    note: 'Your head and upper back carry well forward of neutral. This one compounds.'
+    note: `You are ${pct}% of the way to a hunched back. Your head and upper back carry ` +
+          'well forward of neutral, and this one compounds.'
   };
   return {
     label: 'SEVERE',
-    note: 'At the far end of what this scan can measure. Worth a professional look.'
+    note: `You are ${pct}% of the way to a hunched back — the far end of what this scan ` +
+          'can measure. Worth a professional look.'
   };
 }
+
+/** The plain-English rule the number follows. */
+export const HUNCH_EXPLAINER =
+  'The higher the percentage, the further your upper back has already rolled toward a ' +
+  'permanent hunch — and the higher your chance of ending up there if nothing changes.';
 
 /* ---------- scoring ---------- */
 export function scoreOf(metrics) {
