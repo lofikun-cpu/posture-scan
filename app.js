@@ -1512,11 +1512,25 @@ function playVO(key) {
 
   let durationMs = Math.max(2400, total * VO_MS_PER_CHAR);
   let shown = -1;
+  /* Captions are off while KINA can actually be heard — they competed with the
+     animation, which is the whole point of the screen. They come back the
+     moment the voice cannot do the job: sound muted, or audio that never
+     started. Nothing in the briefing is lost either way; the capture screens
+     repeat every instruction in text. */
+  let captionsOn = !voiceOn;
   const showChunk = (i) => {
-    if (i === shown || !cap) return;
+    if (!cap) return;
+    if (!captionsOn) { cap.classList.remove('on'); shown = i; return; }
+    if (i === shown && cap.classList.contains('on')) return;
     shown = i;
     cap.classList.add('on');
     cap.textContent = lines[i];
+  };
+  /** Bring them back when the audio turns out to be silent. */
+  const captionsFallback = () => {
+    if (captionsOn) return;
+    captionsOn = true;
+    shown = -1;
   };
   const finish = () => {
     if (cap) cap.classList.remove('on');
@@ -1557,6 +1571,8 @@ function playVO(key) {
         audio = null;
         activeEnv = null;
         coreAnalyser = null;
+        // The browser voice is a poor substitute for Edmund, so show the words.
+        captionsFallback();
         speakLines(lines); // fire and forget — the caption walk owns the timing
       };
       // Surface a silent failure instead of leaving the user staring at a
@@ -1569,6 +1585,7 @@ function playVO(key) {
         if (!audioLive && !cancelled) {
           $('kina-status').textContent = '◈ NO AUDIO — CHECK VOLUME / TAP SKIP';
           $('kina-status').classList.add('alert');
+          captionsFallback();   // read it instead of hearing it
         }
       }, 2500);
       audio.addEventListener('playing', onPlaying, { once: true });
@@ -1581,6 +1598,7 @@ function playVO(key) {
       // recording mid-buffer.
       setTimeout(useSpeech, 6000);
     } else if (voiceOn) {
+      captionsFallback();
       speakLines(lines); // no recording configured — built-in voice
     }
 

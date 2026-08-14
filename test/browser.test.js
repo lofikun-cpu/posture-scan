@@ -210,17 +210,18 @@ const skip = (section) => {
   check('playback is actually progressing', au.t > 0.5, JSON.stringify(au));
   check('element is playing, not paused', au.paused === false, JSON.stringify(au));
   check('output is not muted', au.muted === false, JSON.stringify(au));
-  check('briefing shows a caption',
-        (await page.textContent('#vo-caption')).trim().length > 10,
+  // Captions stay out of the way while KINA is audible — the animation is the
+  // screen. They are only a fallback for when the voice cannot be heard.
+  check('no caption over the animation while the voice plays',
+        !(await page.getAttribute('#vo-caption', 'class') || '').includes('on'),
         await page.textContent('#vo-caption'));
-  check('caption track visible', (await page.getAttribute('#vo-caption', 'class') || '').includes('on'));
   check('corner stays clear while KINA speaks', await page.evaluate(() =>
     getComputedStyle(document.getElementById('kina-status')).display === 'none'));
   check('core pulses while speaking',
         (await page.getAttribute('#kina-stage', 'class') || '').includes('speaking'));
   await page.click('#btn-skip-vo');
   await page.waitForTimeout(300);
-  check('skip hides the caption', !(await page.getAttribute('#vo-caption', 'class') || '').includes('on'));
+  check('skip leaves the caption clear', !(await page.getAttribute('#vo-caption', 'class') || '').includes('on'));
   check('skip reveals start button', !(await page.getAttribute('#btn-start', 'class') || '').includes('hidden'));
 
   if (hasFixture) {
