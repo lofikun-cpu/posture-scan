@@ -2,7 +2,9 @@
 
    1. The live-camera timer. It used to run 3-2-1 in under three seconds, which
       is not enough to put the phone down and step back into a normal stance —
-      and the numbers were read aloud by a second voice.
+      and the numbers were read aloud by a second voice. The length also lives
+      in two places, the constant and the button's label, so the label is
+      checked against what the countdown actually does.
    2. That second voice. Every line without a recording used to fall back to the
       browser's built-in speech synthesis: a different speaker, mid-flow,
       announcing "frontal image acquired". This asserts nothing ever reaches
@@ -57,6 +59,8 @@ const check = (n, c, x = '') => {
     check('camera opens', camUp);
 
     if (camUp) {
+      const label = await p.textContent('#btn-snap');
+      const promised = Number((label.match(/(\d+)\s*s/) || [])[1]);
       const t0 = Date.now();
       await p.click('#btn-snap');
       // Watch the countdown element rather than trusting a constant.
@@ -72,11 +76,14 @@ const check = (n, c, x = '') => {
         return vals;
       });
       const elapsed = (Date.now() - t0) / 1000;
-      console.log(`     counted ${seen.join(',')} over ${elapsed.toFixed(1)}s`);
-      check('timer starts at 7', seen[0] === '7', seen.join(','));
-      check('timer counts all the way down', seen.length === 7, seen.join(','));
-      check('timer runs about seven seconds', elapsed > 6.3 && elapsed < 9.5,
-            `${elapsed.toFixed(1)}s`);
+      console.log(`     button says ${promised}s · counted ${seen.join(',')} over ${elapsed.toFixed(1)}s`);
+      check('the button promises the length the timer runs',
+            Number(seen[0]) === promised, `label ${promised}s, counted from ${seen[0]}`);
+      check('timer counts all the way down to 1',
+            seen.length === promised && seen[seen.length - 1] === '1', seen.join(','));
+      check('timer takes about that long in real time',
+            elapsed > promised - 0.7 && elapsed < promised + 2.5,
+            `${elapsed.toFixed(1)}s for a ${promised}s timer`);
     }
 
     await p.waitForTimeout(1500);

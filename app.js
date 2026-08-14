@@ -24,8 +24,9 @@ const APPSTORE_URL = 'https://apps.apple.com/us/app/kina-pt/id6755166316';
 // the share card, and in the copied caption, so it survives every route out.
 const CHALLENGE_TAG = '#posturechallenge';
 
-// Seconds on the live-camera timer.
-const CAPTURE_COUNTDOWN = 7;
+// Seconds on the live-camera timer. Mirrored in the Capture button's label in
+// index.html — change both, or the button promises a number it does not keep.
+const CAPTURE_COUNTDOWN = 5;
 
 /* ---------- custom media ----------
    Drop files into /assets and point these at them. Each one is optional:
@@ -2008,8 +2009,8 @@ $('btn-snap').addEventListener('click', async () => {
   $('btn-cancel-cam').classList.add('hidden');
   const cd = $('countdown');
   cd.style.display = 'flex';
-  // Seven seconds: long enough to put the phone down, step back and settle into
-  // a normal stance, which is the pose the scan is supposed to be reading.
+  // Long enough to put the phone down, step back and settle into a normal
+  // stance, which is the pose the scan is supposed to be reading.
   for (let n = CAPTURE_COUNTDOWN; n >= 1; n--) {
     cd.textContent = String(n);
     sfx('blip', 0.25);          // a tick, not a voice
