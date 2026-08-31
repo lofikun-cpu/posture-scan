@@ -146,7 +146,40 @@ export function analyseBackContour(maskData, mw, mh, lms, facingRight) {
 /* ============================================================
    METRICS
    Each returns severity in [0,1]; 0 is ideal alignment.
+
+   CALIBRATION. Severity is `measured / limit`, so every `limit` below is the
+   deviation that counts as fully bad. The first pass set those limits far too
+   wide and the scan flattered people: a 7 cm forward head — plainly visible
+   across a room — came out at 52% severity, and the whole pose scored 62/100.
+
+   The limits are now anchored to the deviations physiotherapists actually treat
+   as marked on a standing screen, converted through a 48 cm shoulder-to-hip
+   torso and a 38 cm shoulder width:
+
+     forward head        6 cm ahead of the acromion   (normal under 2.5)
+     rounded shoulders   4 cm ahead of the trochanter (normal under 2)
+     sway back           5 cm of hip-ahead-of-ankle   (normal under 2)
+     shoulder drop       2 cm, i.e. 3.5° across the shoulders (normal under 1)
+     pelvic obliquity    1.3 cm, i.e. 4° across the hips       (normal under 1)
+     head off midline    4 cm
+     knee deviation      2 cm off the hip-ankle axis
+     toe-out             22°, penalty starting at 8° (Fick angle is 10-15°)
+
+   Read these as screening bands, not a validated instrument: they are the
+   thresholds a practitioner would flag by eye, applied to a pose model's
+   estimate of where the landmarks are. What they are not is arbitrary, and
+   what they no longer do is tell someone with a visible hunch that they are
+   doing fine.
    ============================================================ */
+
+/* Severity from a measurement, given the band a practitioner would call
+   normal and the one they would call marked. Everything inside `normal` scores
+   zero — a straight `measured / limit` ramp charges people for deviations that
+   are simply how bodies stand, which is why the first calibration had to be so
+   wide to feel fair, and why it then flattered genuinely bad posture. */
+function band(value, normal, marked) {
+  return (Math.abs(value) - normal) / (marked - normal);
+}
 
 function makeAdder(list) {
   return (name, severity, tip, weight = 1, detail = null) =>
@@ -217,24 +250,24 @@ export function assessFront(lms, world, imgW, imgH) {
   // Shoulder height difference. A sign of lateral asymmetry — deliberately
   // NOT labelled as a spinal diagnosis.
   const shTilt = Math.abs(deg(Math.atan2(ls.y - rs.y, ls.x - rs.x)));
-  add('SHOULDER BALANCE', shTilt / 9,
+  add('SHOULDER BALANCE', band(shTilt, 0.8, 5),
       'One shoulder sits higher than the other — common with bag-carrying or a dominant side.', 1.2,
       inches(ls.y - rs.y, scale, ' uneven') || `${shTilt.toFixed(1)}° tilt`);
 
   // Pelvic obliquity (hip drop).
   const hipTilt = Math.abs(deg(Math.atan2(lh.y - rh.y, lh.x - rh.x)));
-  add('PELVIC LEVEL', hipTilt / 8,
+  add('PELVIC LEVEL', band(hipTilt, 1.5, 7),
       'Your hips are uneven — often a hip-hitch habit or a leg-length difference.', 1.2,
       inches(lh.y - rh.y, scale, ' drop') || `${hipTilt.toFixed(1)}° tilt`);
 
   // Lateral trunk lean from vertical.
   const lean = Math.abs(deg(Math.atan2(midSh.x - midHip.x, midHip.y - midSh.y)));
-  add('TRUNK LEAN', lean / 7, 'Your upper body leans off the vertical.', 1.2,
+  add('TRUNK LEAN', band(lean, 0.8, 5), 'Your upper body leans off the vertical.', 1.2,
       `${lean.toFixed(1)}° off vertical`);
 
   // Head centring over the shoulders.
   const headShift = Math.abs(p(LM.nose).x - midSh.x) / shoulderW;
-  add('HEAD CENTRING', headShift / 0.32, 'Your head drifts off your body\'s midline.', 1,
+  add('HEAD CENTRING', band(headShift, 0.015, 0.10), 'Your head drifts off your body\'s midline.', 1,
       inches(p(LM.nose).x - midSh.x, scale, ' off centre') ||
         `${(headShift * 100).toFixed(0)}% of shoulder width`);
 
@@ -256,7 +289,7 @@ export function assessFront(lms, world, imgW, imgH) {
     const worst = knees.reduce((a, b) => Math.abs(a) > Math.abs(b) ? a : b);
     const valgus = worst > 0;
     const legLen = dist(p(LM.leftHip), p(LM.leftAnkle)) || dist(p(LM.rightHip), p(LM.rightAnkle));
-    add(valgus ? 'KNEE VALGUS' : 'KNEE VARUS', Math.abs(worst) / 0.055,
+    add(valgus ? 'KNEE VALGUS' : 'KNEE VARUS', band(worst, 0.006, 0.030),
         valgus ? 'Your knees track inward of the hip-to-ankle line.'
                : 'Your knees track outward of the hip-to-ankle line.', 1.1,
         inches(worst * legLen, scale, valgus ? ' inward' : ' outward') ||
@@ -270,7 +303,7 @@ export function assessFront(lms, world, imgW, imgH) {
   const feet = [fa, fb].filter(v => v !== null);
   if (feet.length) {
     const avg = feet.reduce((a, b) => a + b, 0) / feet.length;
-    add('FOOT PROGRESSION', Math.max(0, avg - 10) / 18,
+    add('FOOT PROGRESSION', band(avg, 12, 26),
         'Your forefoot turns out more than typical — can accompany a flattened arch.', 0.8,
         `${avg.toFixed(0)}° toe-out`);
   }
@@ -325,14 +358,14 @@ export function assessSide(lms, world, imgW, imgH, contour) {
 
   // Forward head: ear anterior to the acromion.
   const fwdHead = ((ear.x - sh.x) * fwd) / torsoLen;
-  add('FORWARD HEAD', Math.max(0, fwdHead) / 0.28,
+  add('FORWARD HEAD', band(Math.max(0, fwdHead), 0.031, 0.135),
       '"Tech neck" — a forward head position can add significant load to the neck and upper back.', 1.5,
       inches(Math.max(0, fwdHead) * torsoLen, scale, ' ahead of shoulder') ||
         `${(Math.max(0, fwdHead) * 100).toFixed(0)}% of torso length`);
 
   // Rounded shoulders: acromion anterior to the greater trochanter.
   const round = ((sh.x - hip.x) * fwd) / torsoLen;
-  add('SHOULDER PROTRACTION', Math.max(0, round) / 0.2,
+  add('SHOULDER PROTRACTION', band(Math.max(0, round), 0.021, 0.100),
       'Your shoulders sit ahead of your hips — a rounded, protracted shoulder pattern.', 1.3,
       inches(Math.max(0, round) * torsoLen, scale, ' ahead of hip') ||
         `${(Math.max(0, round) * 100).toFixed(0)}% of torso length`);
@@ -341,12 +374,12 @@ export function assessSide(lms, world, imgW, imgH, contour) {
   // Both are normalised by the shoulder-to-hip span, so the torso converts
   // them straight into a depth.
   if (contour) {
-    add('THORACIC CURVE', Math.max(0, contour.kyphosis - 0.045) / 0.075,
+    add('THORACIC CURVE', band(contour.kyphosis, 0.042, 0.088),
         'The upper back curves more than typical — a rounded thoracic spine.', 1.2,
         inches(contour.kyphosis * torsoLen, scale, ' of upper-back curve') ||
           `${(contour.kyphosis * 100).toFixed(1)}% of torso length`);
     const deeper = contour.lordosis >= 0.05;
-    add('LUMBAR CURVE', Math.abs(contour.lordosis - 0.05) / 0.06,
+    add('LUMBAR CURVE', band(contour.lordosis - 0.05, 0.010, 0.055),
         'Your low-back curve is deeper or flatter than the typical range.', 1,
         inches(Math.abs(contour.lordosis - 0.05) * torsoLen, scale,
                deeper ? ' deeper than typical' : ' flatter than typical') ||
@@ -357,7 +390,7 @@ export function assessSide(lms, world, imgW, imgH, contour) {
     const legLen = dist(hip, ankle) || 1e-6;
     // Sway back: hips carried ahead of the ankles.
     const sway = ((hip.x - ankle.x) * fwd) / legLen;
-    add('PELVIS OVER BASE', Math.max(0, sway) / 0.12,
+    add('PELVIS OVER BASE', band(Math.max(0, sway), 0.012, 0.065),
         'Your hips ride ahead of your ankles — the classic sway-back stance.', 1,
         inches(Math.max(0, sway) * legLen, scale, ' ahead of ankle') ||
           `${(Math.max(0, sway) * 100).toFixed(0)}% of leg length`);
@@ -365,7 +398,7 @@ export function assessSide(lms, world, imgW, imgH, contour) {
     // Full clinical plumb chain: ankle → knee → hip → shoulder → ear.
     const refs = [knee, hip, sh, ear];
     const devSum = refs.reduce((s, pt) => s + Math.abs(pt.x - ankle.x), 0) / refs.length;
-    add('PLUMB LINE', (devSum / legLen) / 0.16, 'The ear-shoulder-hip-ankle line is broken.', 1.3,
+    add('PLUMB LINE', band(devSum / legLen, 0.018, 0.090), 'The ear-shoulder-hip-ankle line is broken.', 1.3,
         inches(devSum, scale, ' average drift') ||
           `${((devSum / legLen) * 100).toFixed(0)}% of leg length`);
   }
@@ -441,26 +474,43 @@ export const HUNCH_EXPLAINER =
   'The higher the percentage, the further your upper back has already rolled toward a ' +
   'permanent hunch — and the higher your chance of ending up there if nothing changes.';
 
-/* ---------- scoring ---------- */
+/* ---------- scoring ----------
+
+   A plain weighted mean was the second reason the scan flattered people. Most
+   of the twelve checkpoints are fine on most bodies, so two severe findings —
+   the ones you can see across a room — were averaged away by ten that were not.
+   Half the weight now goes to the three worst findings, which is how a person
+   looking at you grades posture: they see the hunch, not the average.
+
+   The exponent above 1 keeps the two ends honest in opposite directions. Minor
+   drift stays in the eighties, because everybody has some and punishing it
+   makes the number meaningless. Genuinely bad posture falls away fast instead
+   of bunching against the floor, so "poor" and "severe" stay distinguishable. */
 export function scoreOf(metrics) {
   if (!metrics.length) return 0;
   const wSum = metrics.reduce((s, m) => s + m.weight, 0);
-  const sevAvg = metrics.reduce((s, m) => s + m.severity * m.weight, 0) / wSum;
-  return Math.round(clamp(100 - Math.pow(sevAvg, 0.85) * 95, 8, 100));
+  const mean = metrics.reduce((s, m) => s + m.severity * m.weight, 0) / wSum;
+  const worst = metrics.map(m => m.severity).sort((a, b) => b - a);
+  const peak = worst.slice(0, 3).reduce((s, v) => s + v, 0) / Math.min(3, worst.length);
+  const sev = 0.55 * mean + 0.45 * peak;
+  return Math.round(clamp(100 - Math.pow(sev, 1.15) * 100, 3, 100));
 }
 
+/* Bands follow the calibrated distribution, not round numbers: textbook lands
+   near 100, very good posture in the low nineties, a typical desk worker around
+   60, and anything a stranger would notice below 40. */
 export function verdictFor(score) {
-  if (score >= 90) return {
+  if (score >= 92) return {
     title: '🏆 STARK-LEVEL ALIGNMENT',
     sub: 'Exceptional. Your skeleton would make a physiotherapist weep with joy. Maintain the protocol.',
     voice: `Remarkable. ${score} out of one hundred. Your alignment is in the top percentile of humans I have scanned. I am genuinely impressed.`
   };
-  if (score >= 75) return {
+  if (score >= 72) return {
     title: '✅ COMBAT READY',
     sub: 'Solid alignment with minor deviations. A focused routine would push you into elite territory.',
     voice: `${score} out of one hundred. Respectable, human. Minor deviations detected — nothing a proper protocol cannot fix.`
   };
-  if (score >= 55) return {
+  if (score >= 45) return {
     title: '⚠ STRUCTURAL DRIFT DETECTED',
     sub: 'Your frame is compensating in several places. This is where most desk workers live — and it responds well to daily work.',
     voice: `${score} out of one hundred. Structural drift detected. Your spine is filing a formal complaint. I recommend intervention.`

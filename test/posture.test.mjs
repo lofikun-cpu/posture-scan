@@ -108,7 +108,10 @@ section('Perfect posture scores 100');
 }
 {
   const lms = buildLms(perfectSidePhys(), PORTRAIT);
-  const m = assessSide(lms, WORLD_SIDE, 1080, 1920, { kyphosis: 0.045, lordosis: 0.05 });
+  // A flat, neutral thoracic contour — chosen to describe a back, not to match
+  // whatever the threshold happens to be, so this still means something if the
+  // calibration moves.
+  const m = assessSide(lms, WORLD_SIDE, 1080, 1920, { kyphosis: 0.035, lordosis: 0.05 });
   const s = scoreOf(m);
   check('side: perfect stance = 100', s === 100, `got ${s}`);
   check('side: every metric OPTIMAL', m.every(x => sevBucket(x.severity) === 0),
@@ -420,7 +423,7 @@ section('Hunch index');
 
 {
   const flat = assessSide(buildLms(perfectSidePhys(), PORTRAIT), WORLD_SIDE, 1080, 1920,
-                          { kyphosis: 0.045, lordosis: 0.05 });
+                          { kyphosis: 0.035, lordosis: 0.05 });
   check('hunch: an upright side view reads 0%', hunchIndex(flat) === 0,
         String(hunchIndex(flat)));
 
@@ -443,6 +446,121 @@ section('Hunch index');
         ['LOW RISK', 'EARLY WARNING', 'ON THE WAY', 'HIGH RISK', 'SEVERE']
           .every((l, i) => hunchBand([5, 25, 45, 70, 95][i]).label === l),
         [5, 25, 45, 70, 95].map(v => hunchBand(v).label).join(' → '));
+}
+
+/* ============================================================ */
+section('Calibration against real bodies');
+
+/* The failure this exists to prevent: a person with a visible hunch scored
+   62/100 and a 39% risk figure, because every threshold was set wide enough to
+   be "fair" and twelve checkpoints averaged the bad ones away.
+
+   Poses below are built in CENTIMETRES and converted, so they can be argued
+   with. The fixture torso (shoulder 0.20 → hip 0.50) is 0.30 image units; call
+   a real torso 48 cm and 1 cm is 0.00625 units. Shoulders are 38 cm across,
+   hips 19 cm — adult averages — because every angle-based metric depends on
+   that baseline and a narrow fixture silently changes what an angle means. */
+{
+  const CM = 0.30 / 48;
+  const W_SCALED = buildWorld({
+    [LM.leftShoulder]: { x: -0.19, y: -0.25, z: 0 },
+    [LM.rightShoulder]: { x: 0.19, y: -0.25, z: 0 },
+    [LM.leftHip]: { x: -0.095, y: 0.1, z: 0 }, [LM.rightHip]: { x: 0.095, y: 0.1, z: 0 },
+    [LM.nose]: { x: 0, y: -0.45, z: 0.1 }
+  });
+
+  const frontPose = ({ shoulder, hip, head, knee, toeOut }) => {
+    const cx = 0.28;
+    const t = toeOut * Math.PI / 180;
+    const phys = {
+      [LM.nose]:          { x: cx + head * CM, y: 0.10 },
+      [LM.leftEar]:       { x: cx + 0.02, y: 0.095 },
+      [LM.rightEar]:      { x: cx - 0.02, y: 0.095 },
+      [LM.leftShoulder]:  { x: cx + 19 * CM, y: 0.20 - shoulder * CM },
+      [LM.rightShoulder]: { x: cx - 19 * CM, y: 0.20 },
+      [LM.leftHip]:       { x: cx + 9.5 * CM, y: 0.50 - hip * CM },
+      [LM.rightHip]:      { x: cx - 9.5 * CM, y: 0.50 },
+      [LM.leftKnee]:      { x: cx + 8 * CM + knee * CM, y: 0.72 },
+      [LM.rightKnee]:     { x: cx - 8 * CM - knee * CM, y: 0.72 },
+      [LM.leftAnkle]:     { x: cx + 6.8 * CM, y: 0.92 },
+      [LM.rightAnkle]:    { x: cx - 6.8 * CM, y: 0.92 },
+      [LM.leftHeel]:      { x: cx + 6.8 * CM, y: 0.94 },
+      [LM.rightHeel]:     { x: cx - 6.8 * CM, y: 0.94 },
+      [LM.leftFoot]:      { x: cx + 6.8 * CM, y: 0.97 },
+      [LM.rightFoot]:     { x: cx - 6.8 * CM, y: 0.97 }
+    };
+    const w = buildWorld({
+      [LM.leftShoulder]: { x: -0.19, y: -0.25, z: 0 },
+      [LM.rightShoulder]: { x: 0.19, y: -0.25, z: 0 },
+      [LM.leftHip]: { x: -0.095, y: 0.1, z: 0 }, [LM.rightHip]: { x: 0.095, y: 0.1, z: 0 },
+      [LM.nose]: { x: 0, y: -0.45, z: 0.1 },
+      [LM.leftHeel]: { x: -0.08, z: 0 },
+      [LM.leftFoot]: { x: -0.08 - 0.15 * Math.sin(t), z: 0.15 * Math.cos(t) },
+      [LM.rightHeel]: { x: 0.08, z: 0 },
+      [LM.rightFoot]: { x: 0.08 + 0.15 * Math.sin(t), z: 0.15 * Math.cos(t) }
+    });
+    return assessFront(buildLms(phys, PORTRAIT), w, 1080, 1920);
+  };
+
+  /* `ear` is ahead of the SHOULDER, `shoulder` ahead of the hip, `sway` ahead
+     of the ankle — each measured from the part above it, which is what the
+     clinical terms mean. Getting this wrong makes a forward head look mild. */
+  const sidePose = ({ ear, shoulder, sway, kyphosis }) => {
+    const cx = 0.28;
+    const shX = cx + (sway + shoulder) * CM;
+    const earX = cx + (sway + shoulder + ear) * CM;
+    const phys = {
+      [LM.nose]:          { x: earX + 0.045, y: 0.10 },
+      [LM.leftEar]:       { x: earX, y: 0.095 },
+      [LM.rightEar]:      { x: earX, y: 0.095, v: 0.3 },
+      [LM.leftShoulder]:  { x: shX, y: 0.20 },
+      [LM.rightShoulder]: { x: shX, y: 0.20, v: 0.3 },
+      [LM.leftHip]:       { x: cx + sway * CM, y: 0.50 },
+      [LM.rightHip]:      { x: cx + sway * CM, y: 0.50, v: 0.3 },
+      [LM.leftKnee]:      { x: cx, y: 0.72 },
+      [LM.leftAnkle]:     { x: cx, y: 0.92 }
+    };
+    return assessSide(buildLms(phys, PORTRAIT), WORLD_SIDE, 1080, 1920,
+                      { kyphosis, lordosis: 0.05 });
+  };
+
+  const CASES = [
+    { name: 'textbook',   lo: 92, hi: 100, maxHunch: 12,
+      f: { shoulder: 0, hip: 0, head: 0, knee: 0, toeOut: 8 },
+      s: { ear: 0.5, shoulder: 0.5, sway: 0, kyphosis: 0.035 } },
+    { name: 'minor drift', lo: 80, hi: 96, maxHunch: 30,
+      f: { shoulder: 0.5, hip: 0.4, head: 0.6, knee: 0.4, toeOut: 12 },
+      s: { ear: 2, shoulder: 1.5, sway: 1, kyphosis: 0.05 } },
+    { name: 'desk worker', lo: 40, hi: 70, minHunch: 35,
+      f: { shoulder: 1.2, hip: 0.8, head: 1.5, knee: 1, toeOut: 16 },
+      s: { ear: 4, shoulder: 3, sway: 2.5, kyphosis: 0.07 } },
+    // The one that started this: plainly bad posture, previously scored 62.
+    { name: 'visibly bad', lo: 5, hi: 32, minHunch: 80,
+      f: { shoulder: 2.5, hip: 1.5, head: 3, knee: 2, toeOut: 20 },
+      s: { ear: 7, shoulder: 6, sway: 4, kyphosis: 0.10 } },
+    { name: 'severe', lo: 3, hi: 18, minHunch: 90,
+      f: { shoulder: 4, hip: 2.5, head: 5, knee: 3.5, toeOut: 26 },
+      s: { ear: 11, shoulder: 9, sway: 7, kyphosis: 0.15 } }
+  ];
+
+  const scores = [];
+  for (const c of CASES) {
+    const fm = frontPose(c.f), sm = sidePose(c.s);
+    const total = scoreOf(fm.concat(sm));
+    const hunch = hunchIndex(sm);
+    scores.push(total);
+    console.log(`     ${c.name.padEnd(12)} ${String(total).padStart(3)}/100  hunch ${String(hunch).padStart(3)}%`);
+    check(`${c.name}: scores ${c.lo}-${c.hi}`, total >= c.lo && total <= c.hi, `got ${total}`);
+    if (c.maxHunch !== undefined) {
+      check(`${c.name}: risk stays under ${c.maxHunch}%`, hunch <= c.maxHunch, `got ${hunch}`);
+    }
+    if (c.minHunch !== undefined) {
+      check(`${c.name}: risk reads at least ${c.minHunch}%`, hunch >= c.minHunch, `got ${hunch}`);
+    }
+  }
+  check('worse posture always scores lower',
+        scores.every((v, i) => i === 0 || v < scores[i - 1]), scores.join(' > '));
+  check('a visible hunch cannot pass as respectable', scores[3] < 40, `got ${scores[3]}`);
 }
 
 /* ============================================================ */

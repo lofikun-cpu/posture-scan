@@ -106,6 +106,27 @@ when feet are out of frame. The back-contour trace is discarded if it steps
 discontinuously, which is how an outstretched arm or a chair back gets caught
 instead of being scored as spinal curvature.
 
+## Scoring calibration
+
+Severity per checkpoint is `(measured − normal) / (marked − normal)`, clamped to
+0–1: everything inside the normal band scores zero, and `marked` is the
+deviation a physiotherapist would flag on a standing screen. Limits are anchored
+in centimetres — 6 cm of forward head, 4 cm of shoulder protraction, 2 cm of
+shoulder drop — and converted through a 48 cm torso and 38 cm shoulder width.
+
+The total is not a plain mean. Most of the twelve checkpoints are fine on most
+bodies, so averaging let two severe findings be washed out by ten good ones;
+half the weight now goes to the three worst, which is how a person looking at
+you grades posture. The exponent above 1 keeps minor drift in the eighties
+(everyone has some) while letting genuinely bad posture fall away fast instead
+of bunching against the floor.
+
+`test/posture.test.mjs` holds the calibration as five poses described in
+centimetres — textbook, minor drift, desk worker, visibly bad, severe — and
+asserts each lands in its band. That test exists because the first calibration
+scored a person with a visible hunch at 62/100 with a 39% risk figure; the same
+pose now scores 17 with 100%.
+
 ## Measurements
 
 Every checkpoint reports a figure, not just a severity word: "1.8 in ahead of
