@@ -1,1 +1,204 @@
-# posture-scan
+# POSTURE.SCAN — viral AI posture analyzer (KinaPT funnel)
+
+A "Jarvis"-style HUD web app. The user takes **two photos** (front and side),
+an on-device AI grades their alignment across 12 biomechanical checkpoints,
+delivers a score out of 100 with a synthesized voice, reports **how far each
+checkpoint sits from ideal in inches**, headlines a **hunchback risk
+percentage**, copies a shareable score card straight to the clipboard for
+Instagram or TikTok, and deep-links to **KinaPT** on the App Store.
+
+No backend. No API keys. No per-user cost.
+
+## The funnel
+
+1. **Greet** — animated boot sequence, typed instructions (voice starts on first tap, per mobile autoplay policy)
+2. **Capture front** — live camera with countdown + silhouette guide, or upload
+3. **Capture side** — same, with a 90°-turn guide
+4. **Analyze** — per-photo quality gating, skeleton overlay, scan sweep, 12 graded checkpoints
+5. **Score** — animated ring, total /100 plus separate FRONT and SIDE sub-scores
+6. **Simulate** — drag-to-compare slider: their photo warped toward ideal alignment
+7. **Share** — 1080×1350 score card via the native share sheet
+8. **CTA** — deep link to the KinaPT App Store listing, carrying scan context
+
+## Deploy (the URL you boost traffic to)
+
+Hosted free on **GitHub Pages**:
+
+1. Repo → **Settings → Pages → Deploy from a branch** → pick the branch, root folder
+2. Your URL: `https://<user>.github.io/posture-scan/`
+3. Optional: a custom domain (e.g. `scan.kinapt.app`) for brand trust in shares
+
+**Before boosting**, edit two constants in `app.js`:
+- `APPSTORE_URL` — currently a placeholder `id0000000000`; replace with the real KinaPT listing
+- The `og:image` URL in `index.html` if you move to a custom domain
+
+## Architecture
+
+Everything runs client-side. Pose estimation uses Google's **MediaPipe Pose
+Landmarker** (`full` model, ~9.4 MB), vendored into `/vendor` so the whole app
+is served from one origin — no third-party CDN. The Jarvis voice is the Web
+Speech API. Share cards are canvas.
+
+This is deliberate:
+- **$0 per user** — boosted traffic spikes cost nothing and can't take the app down
+- **Privacy is a feature** — "your photos never leave your phone" is displayed prominently, which removes the main objection to uploading a body photo
+- **No dataset needed** — the pose model is pretrained; grading is deterministic geometry over its landmarks
+
+### APIs used (all free, no keys)
+
+| API | Purpose |
+|---|---|
+| MediaPipe Tasks Vision (vendored) | 33 landmarks, 3D world landmarks, segmentation mask |
+| Web Speech API | Jarvis voice |
+| `getUserMedia` | live camera capture |
+| Canvas 2D | HUD overlay, mesh warp, share card |
+| Web Share API | native share sheet with image |
+
+## What's measured
+
+The view is verified in 3D before anything is scored (see *Quality gating*).
+
+**Frontal plane** — shoulder balance, pelvic level (hip drop), trunk lean,
+head centring, knee valgus/varus (offset from the hip→ankle mechanical axis),
+foot progression (forefoot abduction).
+
+**Sagittal plane** — forward head (ear vs acromion), shoulder protraction
+(acromion vs greater trochanter), thoracic curve, lumbar curve, pelvis over
+base (sway back), and the full clinical plumb chain ankle → knee → hip →
+shoulder → ear.
+
+Each checkpoint maps to a 0–1 severity against physio-informed thresholds,
+then a weighted, slightly non-linear blend produces the score. Mid-range
+results cluster 55–85: low enough to motivate the CTA, high enough to share.
+
+### Three things worth knowing about the measurements
+
+**Aspect ratio is corrected before any geometry.** MediaPipe normalises `x` by
+image width and `y` by image height. Mixing them raw makes every angle wrong on
+portrait phone photos — which is essentially all traffic. `posture.js` rescales
+x into y-units first, and there's a regression test asserting the same physical
+pose scores identically in portrait and landscape.
+
+**Pelvic tilt is not measured, on purpose.** Anterior/posterior pelvic tilt is
+the ASIS–PSIS angle, and MediaPipe gives one hip point per side — the line
+between them is the pelvis's mediolateral axis, and you can't measure rotation
+*about* an axis using only that axis. What's reported instead is what's
+genuinely observable: lumbar curve depth from the body outline, and sway back
+from hip-over-ankle translation.
+
+**Foot progression is computed in 3D against the pelvis-forward axis**, so
+whole-body rotation can't masquerade as forefoot abduction. It still can't see
+the medial arch — no pose model can from front or side — so it's labelled as
+what it measures.
+
+Metrics are described, never diagnosed. Shoulder asymmetry is reported as
+"shoulder balance", not as a spinal condition — that keeps the app out of
+medical-device territory and out of ad-moderation trouble.
+
+## Quality gating
+
+Bad input producing a confident score is the fastest way to lose credibility,
+so each photo must pass before it's scored. Using the 3D world landmarks, the
+app computes hip-axis rotation and rejects a "front" photo turned more than 32°
+off square, or a "side" photo under 55° of turn — with a message naming the
+measured angle. It also requires the full torso, and warns (rather than fails)
+when feet are out of frame. The back-contour trace is discarded if it steps
+discontinuously, which is how an outstretched arm or a chair back gets caught
+instead of being scored as spinal curvature.
+
+## Scoring calibration
+
+Severity per checkpoint is `(measured − normal) / (marked − normal)`, clamped to
+0–1: everything inside the normal band scores zero, and `marked` is the
+deviation a physiotherapist would flag on a standing screen. Limits are anchored
+in centimetres — 6 cm of forward head, 4 cm of shoulder protraction, 2 cm of
+shoulder drop — and converted through a 48 cm torso and 38 cm shoulder width.
+
+The total is not a plain mean. Most of the twelve checkpoints are fine on most
+bodies, so averaging let two severe findings be washed out by ten good ones;
+half the weight now goes to the three worst, which is how a person looking at
+you grades posture. The exponent above 1 keeps minor drift in the eighties
+(everyone has some) while letting genuinely bad posture fall away fast instead
+of bunching against the floor.
+
+`test/posture.test.mjs` holds the calibration as five poses described in
+centimetres — textbook, minor drift, desk worker, visibly bad, severe — and
+asserts each lands in its band. That test exists because the first calibration
+scored a person with a visible hunch at 62/100 with a 39% risk figure; the same
+pose now scores 17 with 100%.
+
+## Measurements
+
+Every checkpoint reports a figure, not just a severity word: "1.8 in ahead of
+shoulder", "0.6 in uneven", "17° toe-out". The planar maths works in image
+units, so the conversion comes from MediaPipe's world landmarks — a metric body
+fit — using the shoulder-to-hip torso as the ruler. That fit is estimated from
+a single photograph by a generic model, so absolute scale carries real error:
+figures are rounded to a tenth of an inch, labelled as estimates in the UI, and
+suppressed entirely (falling back to angles and percentages) when the fitted
+torso lands outside 20–80 cm, which means the fit has failed.
+
+## Hunchback risk
+
+One headline percentage, on the same ring as the score because it is read the
+same way: a weighted measure of the thoracic curve, the head carried ahead of
+the shoulders, and the shoulders ahead of the hips. 0% is a stacked upper body,
+100% the far end of what the scan resolves.
+
+The screen states the rule in plain words: the higher the percentage, the
+further the upper back has already rolled toward a permanent hunch, and the
+higher the chance of ending up there if nothing changes. That is a statement
+about direction, which the measurement supports.
+
+What it deliberately does not say is "you have an N% chance of becoming a
+hunchback". Nobody has run the cohort study that would license that sentence,
+and inventing the probability would be the one thing in this app that is not
+real. The number is unchanged and still headlines the screen; only the claim
+attached to it is bounded. Hyperkyphosis is a clinical finding that needs a
+clinician and imaging, and the results screen says so.
+
+## Sharing
+
+Neither Instagram nor TikTok accepts a pre-filled post from the web; no URL
+opens a composer with an image attached. So the flow is the two-step one that
+actually works: the card and caption go to the clipboard in one tap, then
+buttons open Instagram or TikTok to paste into. Every leg has a fallback —
+text-only if the clipboard refuses images, a file download if it refuses both,
+and a web URL if the app's scheme does not resolve.
+
+`#posturechallenge` is on the results screen, burned into the share card, in the
+copied caption, and spoken by KINA, so it survives whichever route out the user
+takes — including the one where they just screenshot the page.
+
+## Colour variants
+
+`brand.html` is the same app in KinaPT's palette, generated rather than forked:
+
+```bash
+node tools/build-brand.js
+```
+
+It rewrites index.html's `:root` block and injects a canvas palette before the
+module loads, so the two builds cannot drift — rerun it after any change to
+index.html. The interface stays dark in both: the bloom pass composites with
+`lighter`, so every glow depends on a dark ground, and moving the HUD onto the
+brand's cream would mean a different renderer rather than a recolour. The brand
+hue also had to gain chroma on the way in; the app's sage is pale enough that
+additive bloom washes it to white, taking the brand with it.
+
+## Tests
+
+```bash
+node test/posture.test.mjs     # 64 checks, no dependencies
+```
+
+Covers the full analysis engine: perfect-posture baselines, aspect-ratio
+independence, metric monotonicity and sign conventions (valgus vs varus,
+forward vs backward head), mirror invariance, 3D rotation gating, contour
+extraction and its rejection guards, warp geometry, and scoring behaviour.
+
+The browser integration path (MediaPipe loading, mask decoding, two-photo UI
+flow, mesh warp, share card) is exercised separately with Playwright against a
+local server; `app.js` exposes a `window.__scan` seam on localhost only.
+
+> Not a medical device — wellness screening demo only (stated in the footer).

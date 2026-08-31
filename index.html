@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>POSTURE.SCAN — AI Posture Analysis</title>
+<meta name="description" content="Scan your posture with AI in 30 seconds. Front and side analysis, graded out of 100 — powered by KinaPT.">
+<meta property="og:title" content="POSTURE.SCAN — What's your Posture Score?">
+<meta property="og:description" content="AI scans your posture like Jarvis scans Iron Man. Get your alignment score out of 100 — free, on your phone.">
+<meta property="og:image" content="https://lofikun-cpu.github.io/posture-scan/assets/og-card.png">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='40' fill='none' stroke='%2324dddd' stroke-width='8'/%3E%3Ccircle cx='50' cy='50' r='14' fill='%2324dddd'/%3E%3C/svg%3E">
+<style>
+  :root {
+    /* HUD palette sampled from the reference frames:
+       cyan #24dddd (dominant), red-orange #ed4d42, gold #f1dc2a,
+       magenta #fc40c9 (sparse). Camera-darkened, so screen values run brighter. */
+    --cyan: #24dddd;
+    --cyan-hot: #a8f5f5;
+    --cyan-dim: rgba(36, 221, 221, 0.38);
+    --cyan-faint: rgba(36, 221, 221, 0.09);
+    --orange: #ffb347;
+    --red: #ed4d42;
+    --green: #5fe6b0;
+    --bg: #03070d;
+    --panel: rgba(9, 21, 33, 0.84);
+    --text: #cfe9f5;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', 'Roboto', system-ui, sans-serif;
+    overflow-x: hidden;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #bg-canvas {
+    position: fixed; inset: 0; z-index: 0;
+    width: 100vw; height: 100vh; height: 100dvh;
+  }
+
+  /* On iOS, 100vh is the viewport with the Safari toolbars hidden — taller
+     than what you can actually see — so a 100vh page pushes its own bottom
+     under the toolbar and the whole thing scrolls. dvh tracks the visible
+     area, and the vh line above it stays as the fallback. */
+  #app {
+    position: relative; z-index: 1;
+    max-width: 560px; margin: 0 auto;
+    min-height: 100vh;
+    min-height: 100dvh;
+    display: flex; flex-direction: column;
+    padding: 16px 16px calc(20px + env(safe-area-inset-bottom));
+  }
+
+  /* The intro is one screen by design: the animation, and one control on it.
+     Nothing there should ever scroll. */
+  body.intro { overflow: hidden; }
+  body.intro #app { height: 100dvh; }
+
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 4px 14px;
+  }
+  .logo {
+    font-family: 'Consolas', monospace;
+    font-size: 15px; letter-spacing: 3px; color: var(--cyan);
+    text-shadow: 0 0 12px var(--cyan-dim);
+  }
+  .logo b { color: #fff; }
+  /* The wordmark is 23 monospace characters; on a narrow phone it wraps to two
+     lines and pushes the whole header down. Sized off width, not height. */
+  @media (max-width: 430px) {
+    .logo { font-size: 13px; letter-spacing: 2px; }
+  }
+  #mute-btn {
+    background: none; border: 1px solid var(--cyan-dim); color: var(--cyan);
+    font-family: monospace; font-size: 11px; letter-spacing: 1px;
+    padding: 6px 10px; border-radius: 4px; cursor: pointer;
+  }
+
+  .panel { display: none; flex: 1; flex-direction: column; animation: panelIn 0.45s ease both; }
+  .panel.active { display: flex; }
+  @keyframes panelIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+
+  .hud-frame {
+    position: relative;
+    border: 1px solid var(--cyan-dim);
+    background: var(--panel);
+    border-radius: 10px;
+    padding: 22px 20px;
+    box-shadow: 0 0 40px rgba(36, 221, 221, 0.06), inset 0 0 60px rgba(36, 221, 221, 0.03);
+  }
+  .hud-frame::before, .hud-frame::after {
+    content: ''; position: absolute; width: 18px; height: 18px; border: 2px solid var(--cyan);
+  }
+  .hud-frame::before { top: -2px; left: -2px; border-right: none; border-bottom: none; border-radius: 8px 0 0 0; }
+  .hud-frame::after { bottom: -2px; right: -2px; border-left: none; border-top: none; border-radius: 0 0 8px 0; }
+
+  .sys-label {
+    font-family: monospace; font-size: 10px; letter-spacing: 2.5px;
+    color: var(--cyan); opacity: 0.75; margin-bottom: 10px;
+  }
+  h1 { font-size: 26px; font-weight: 600; letter-spacing: 0.5px; color: #fff; margin-bottom: 6px; line-height: 1.25; }
+  h1 .accent { color: var(--cyan); text-shadow: 0 0 16px var(--cyan-dim); }
+
+  #console {
+    font-family: monospace; font-size: 13.5px; line-height: 1.75;
+    color: var(--text); min-height: 96px; margin: 16px 0; white-space: pre-wrap;
+  }
+  #console .cursor {
+    display: inline-block; width: 8px; height: 15px; background: var(--cyan);
+    vertical-align: text-bottom; animation: blink 0.9s steps(1) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .instructions { list-style: none; margin: 14px 0 20px; }
+  .instructions li {
+    font-size: 13.5px; padding: 9px 0 9px 30px; position: relative;
+    border-bottom: 1px solid rgba(36, 221, 221, 0.1); color: #a8d8e8;
+  }
+  .instructions li::before {
+    content: attr(data-n); position: absolute; left: 0; top: 9px;
+    font-family: monospace; color: var(--cyan); font-size: 12px;
+    border: 1px solid var(--cyan-dim); border-radius: 3px;
+    width: 20px; height: 20px; text-align: center; line-height: 19px;
+  }
+
+  .btn {
+    display: block; width: 100%;
+    background: linear-gradient(180deg, rgba(36,221,221,0.16), rgba(36,221,221,0.06));
+    border: 1px solid var(--cyan); color: var(--cyan);
+    font-family: monospace; font-size: 15px; letter-spacing: 3px;
+    padding: 16px; border-radius: 6px; cursor: pointer;
+    text-transform: uppercase; text-align: center;
+    transition: all 0.2s; position: relative; overflow: hidden; text-decoration: none;
+  }
+  .btn:active { transform: scale(0.98); }
+  .btn:disabled { opacity: 0.45; pointer-events: none; }
+  .btn:hover { background: rgba(36,221,221,0.24); box-shadow: 0 0 24px var(--cyan-dim); }
+  .btn.secondary {
+    background: none; border-color: var(--cyan-dim); color: #7fb8cc;
+    font-size: 12px; padding: 12px; letter-spacing: 2px; margin-top: 10px;
+  }
+  .btn.cta {
+    border-color: var(--orange); color: var(--orange);
+    background: linear-gradient(180deg, rgba(255,179,71,0.18), rgba(255,179,71,0.04));
+  }
+  .btn.cta:hover { box-shadow: 0 0 24px rgba(255,179,71,0.3); }
+  .btn-row { display: flex; gap: 10px; }
+  .btn-row .btn { flex: 1; }
+
+  .privacy-note {
+    font-family: monospace; font-size: 10.5px; color: #4d7d90;
+    text-align: center; margin-top: 14px; letter-spacing: 0.5px;
+  }
+  .privacy-note b { color: var(--green); }
+
+  /* ---------- KINA core stage ----------
+     Fills the viewport behind the intro overlay; hidden once the scan starts. */
+  #kina-stage {
+    position: fixed; inset: 0; z-index: 1;
+    overflow: hidden; background: #01050a;
+    display: none;
+  }
+  body.intro #kina-stage { display: block; }
+  body.intro #app > header { position: relative; z-index: 3; }
+  /* intro is the animation and one button — nothing else */
+  body.intro footer { display: none; }
+
+  /* Intro screen: animation only, with the control anchored at the bottom. */
+  #intro-overlay {
+    position: relative; z-index: 3;
+    flex: 1; display: flex; flex-direction: column;
+    justify-content: flex-end;
+    padding-bottom: 8px;
+  }
+  #ios-sound {
+    font-family: monospace; font-size: 12px; letter-spacing: 0.5px;
+    color: var(--orange); text-align: center;
+    border: 1px solid rgba(255,179,71,0.45); border-radius: 6px;
+    background: rgba(3,7,13,0.72); padding: 10px 12px; margin-bottom: 10px;
+  }
+  #intro-overlay .btn {
+    backdrop-filter: blur(3px);
+    background: linear-gradient(180deg, rgba(36,221,221,0.22), rgba(3,7,13,0.55));
+  }
+  #kina-loop, #kina-core {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; display: block;
+  }
+  #kina-loop { z-index: 2; opacity: 0; transition: opacity 0.6s; }
+  #kina-loop.ready { opacity: 1; }
+  #kina-core { z-index: 1; }
+  #kina-scanlines {
+    position: absolute; inset: 0; z-index: 3; pointer-events: none;
+    background:
+      repeating-linear-gradient(180deg, rgba(36,221,221,0.06) 0 1px, transparent 1px 3px),
+      radial-gradient(ellipse at center, transparent 45%, rgba(4,8,15,0.75) 100%);
+  }
+  /* The running commentary is gone from the corner — it was clutter over the
+     animation. The element stays for one job: warning the user when the audio
+     silently fails to start, which is worth interrupting for. */
+  #kina-status {
+    display: none;
+    position: absolute; left: 10px; z-index: 4;
+    bottom: calc(9px + env(safe-area-inset-bottom));
+    font-family: monospace; font-size: 9.5px; letter-spacing: 2px;
+    color: var(--cyan); text-shadow: 0 0 8px var(--cyan-dim);
+  }
+  #kina-status.alert {
+    display: block; color: var(--orange);
+    text-shadow: 0 0 8px rgba(255,179,71,0.5);
+  }
+  @keyframes pulseDim { 50% { opacity: 0.35; } }
+
+  /* Short screens — most phones once the browser chrome is showing. Trim the
+     furniture rather than let the button drift under the toolbar. */
+  @media (max-height: 720px) {
+    #app { padding: 10px 14px calc(12px + env(safe-area-inset-bottom)); }
+    header { padding: 4px 4px 8px; }
+    .logo { font-size: 13px; letter-spacing: 2.5px; }
+    #mute-btn { font-size: 10px; padding: 5px 8px; }
+    #ios-sound { font-size: 11px; padding: 8px 10px; margin-bottom: 8px; }
+    #intro-overlay .btn { padding: 13px 16px; font-size: 14px; }
+    #vo-caption { font-size: 15px; padding: 10px 12px; }
+  }
+
+  /* ---------- voiceover captions ---------- */
+  #vo-caption {
+    display: none;
+    font-family: monospace; font-size: 14px; line-height: 1.6;
+    color: #fff; text-align: center;
+    background: rgba(3,7,13,0.72);
+    border: 1px solid var(--cyan-dim);
+    padding: 14px 16px; border-radius: 6px; margin: 0 0 14px;
+    backdrop-filter: blur(4px);
+    text-shadow: 0 0 12px rgba(36,221,221,0.5);
+  }
+  #vo-caption.on { display: block; }
+
+  /* ---------- progress dots ---------- */
+  #steps { display: flex; gap: 8px; justify-content: center; margin-bottom: 14px; }
+  .step-dot {
+    font-family: monospace; font-size: 9px; letter-spacing: 1.5px;
+    color: #33566b; border: 1px solid rgba(36,221,221,0.17);
+    padding: 5px 10px; border-radius: 3px;
+  }
+  .step-dot.done { color: var(--green); border-color: rgba(61,255,160,0.4); }
+  .step-dot.current { color: var(--cyan); border-color: var(--cyan); background: var(--cyan-faint); }
+
+  /* ---------- capture ---------- */
+  #video-wrap, #img-wrap {
+    position: relative; border-radius: 8px; overflow: hidden;
+    border: 1px solid var(--cyan-dim); background: #000; margin: 14px 0;
+  }
+  #cam-video { width: 100%; display: block; transform: scaleX(-1); }
+  #scan-canvas { width: 100%; display: block; }
+  #countdown {
+    position: absolute; inset: 0; display: none;
+    align-items: center; justify-content: center;
+    font-family: monospace; font-size: 90px; color: var(--cyan);
+    text-shadow: 0 0 40px var(--cyan); background: rgba(4,8,15,0.35);
+  }
+  /* silhouette guide overlay */
+  #pose-guide {
+    position: absolute; inset: 0; pointer-events: none;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #pose-guide svg { height: 92%; opacity: 0.5; }
+  /* targeting reticle framing the subject, from the reference */
+  #reticle {
+    position: absolute; inset: 0; z-index: 3; pointer-events: none;
+  }
+  #reticle i {
+    position: absolute; width: 16px; height: 16px;
+    border: 2px solid var(--orange);
+  }
+  #reticle i:nth-child(1) { top: 14%; left: 22%; border-right: none; border-bottom: none; }
+  #reticle i:nth-child(2) { top: 14%; right: 22%; border-left: none; border-bottom: none; }
+  #reticle i:nth-child(3) { bottom: 8%; left: 22%; border-right: none; border-top: none; }
+  #reticle i:nth-child(4) { bottom: 8%; right: 22%; border-left: none; border-top: none; }
+  #reticle b {
+    position: absolute; top: 50%; left: 50%; width: 12px; height: 12px;
+    margin: -6px 0 0 -6px;
+    border-left: 1px solid var(--green); border-top: 1px solid var(--green);
+    transform: rotate(45deg); opacity: 0.85;
+  }
+  #reticle u {
+    position: absolute; top: 14%; bottom: 8%; left: 22%; right: 22%;
+    border: 1px solid rgba(36,221,221,0.35);
+    background:
+      linear-gradient(rgba(36,221,221,0.14) 1px, transparent 1px) 0 0 / 100% 33.33%,
+      linear-gradient(90deg, rgba(36,221,221,0.14) 1px, transparent 1px) 0 0 / 33.33% 100%;
+  }
+
+  .thumbs { display: flex; gap: 10px; margin: 12px 0 0; }
+  .thumb {
+    flex: 1; border: 1px solid rgba(36,221,221,0.22); border-radius: 6px;
+    overflow: hidden; position: relative; background: #000; min-height: 78px;
+  }
+  .thumb img { width: 100%; display: block; opacity: 0.75; }
+  .thumb .tag {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    font-family: monospace; font-size: 9px; letter-spacing: 1.5px;
+    background: rgba(4,8,15,0.85); color: var(--cyan); padding: 4px; text-align: center;
+  }
+  .thumb.empty { display: flex; align-items: center; justify-content: center;
+    font-family: monospace; font-size: 10px; color: #33566b; letter-spacing: 1px; }
+
+  /* ---------- analysis readout ---------- */
+  #metrics { margin: 14px 0 4px; }
+  .metric-row {
+    display: flex; align-items: center; justify-content: space-between;
+    font-family: monospace; font-size: 12px;
+    padding: 9px 2px; border-bottom: 1px solid rgba(36,221,221,0.12);
+    opacity: 0; transform: translateX(-8px); transition: all 0.35s ease;
+  }
+  .metric-row.show { opacity: 1; transform: none; }
+  .metric-name { color: #a8d8e8; letter-spacing: 1px; }
+  .metric-badge { font-size: 10px; letter-spacing: 1.5px; padding: 3px 9px; border-radius: 3px; border: 1px solid; }
+  .sev-0 { color: var(--green); border-color: var(--green); background: rgba(61,255,160,0.08); }
+  .sev-1 { color: var(--cyan); border-color: var(--cyan); background: var(--cyan-faint); }
+  .sev-2 { color: var(--orange); border-color: var(--orange); background: rgba(255,179,71,0.08); }
+  .sev-3 { color: var(--red); border-color: var(--red); background: rgba(255,77,94,0.08); }
+
+  .plane-head {
+    font-family: monospace; font-size: 10px; letter-spacing: 2px;
+    color: var(--cyan); opacity: 0.8; margin: 16px 0 4px; padding-top: 10px;
+    border-top: 1px solid rgba(36,221,221,0.17);
+  }
+  .plane-head span { float: right; color: #fff; opacity: 0.9; }
+
+  #scan-status {
+    font-family: monospace; font-size: 11px; color: var(--cyan);
+    letter-spacing: 2px; text-align: center; margin-top: 10px; min-height: 16px;
+  }
+
+  /* ---------- score ---------- */
+  #score-ring-wrap { display: flex; justify-content: center; margin: 10px 0 6px; }
+  #score-ring { width: 220px; height: 220px; }
+  .ring-bg { fill: none; stroke: rgba(36,221,221,0.14); stroke-width: 10; }
+  .ring-fg {
+    fill: none; stroke: var(--cyan); stroke-width: 10; stroke-linecap: round;
+    filter: drop-shadow(0 0 8px var(--cyan-dim));
+    transform: rotate(-90deg); transform-origin: center;
+    transition: stroke-dashoffset 2s cubic-bezier(0.22, 1, 0.36, 1), stroke 0.5s;
+  }
+  #score-num { font-family: monospace; font-size: 58px; fill: #fff; font-weight: 700; }
+  #score-outof { font-family: monospace; font-size: 13px; fill: #6da8bd; letter-spacing: 2px; }
+  #verdict { text-align: center; font-size: 17px; color: #fff; margin: 6px 0 4px; font-weight: 600; letter-spacing: 0.5px; }
+  #verdict-sub { text-align: center; font-family: monospace; font-size: 12px; color: #7fb8cc; margin-bottom: 10px; line-height: 1.6; padding: 0 8px; }
+
+  #subscores { display: flex; gap: 10px; margin: 4px 0 8px; }
+  .subscore {
+    flex: 1; text-align: center; border: 1px solid rgba(36,221,221,0.22);
+    border-radius: 6px; padding: 10px 6px;
+  }
+  .subscore .lbl { font-family: monospace; font-size: 9px; letter-spacing: 2px; color: #6da8bd; }
+  .subscore .val { font-family: monospace; font-size: 26px; color: #fff; font-weight: 700; line-height: 1.3; }
+
+  /* ---------- forward-roll index ---------- */
+  #hunch-box {
+    margin: 18px 0 6px; padding: 16px 14px;
+    border: 1px solid var(--cyan-dim); border-radius: 8px;
+    background: linear-gradient(180deg, rgba(36,221,221,0.06), transparent);
+  }
+  /* Given the same ring as the score, because it is read the same way. */
+  #hunch-ring-wrap { display: flex; justify-content: center; margin: 6px 0 2px; }
+  #hunch-ring { width: 180px; height: 180px; }
+  #hunch-num { font-family: monospace; font-size: 52px; fill: #fff; font-weight: 700; }
+  #hunch-outof { font-family: monospace; font-size: 12px; fill: #6da8bd; letter-spacing: 3px; }
+  #hunch-label {
+    text-align: center; font-family: monospace; font-size: 13px; letter-spacing: 2px;
+    color: var(--cyan); margin-bottom: 5px;
+  }
+  #hunch-note {
+    text-align: center; font-size: 12.5px; color: #9dc4d4; line-height: 1.5; padding: 0 6px;
+  }
+  .hunch-scale {
+    display: flex; justify-content: space-between; margin-top: 10px;
+    font-family: monospace; font-size: 9px; letter-spacing: 1.5px; color: #4d7d90;
+  }
+
+  /* the measured figure under each checkpoint name */
+  .metric-detail {
+    display: block; font-family: monospace; font-size: 11px;
+    color: var(--cyan); opacity: 0.85; letter-spacing: 0.5px; margin-top: 3px;
+  }
+  .measure-note {
+    font-family: monospace; font-size: 9.5px; color: #4d7d90;
+    text-align: center; margin-top: 10px; letter-spacing: 0.5px; line-height: 1.5;
+  }
+
+  #hunch-explain {
+    text-align: center; font-family: monospace; font-size: 11px; line-height: 1.55;
+    color: #7fb8cc; margin-top: 8px; padding: 0 4px;
+  }
+  #challenge-box {
+    margin-top: 16px; padding: 14px 14px 12px; border-radius: 8px;
+    border: 1px dashed rgba(36,221,221,0.45);
+    background: linear-gradient(180deg, rgba(36,221,221,0.08), transparent);
+    text-align: center;
+  }
+  .challenge-tag {
+    font-family: monospace; font-size: 10px; letter-spacing: 2px;
+    color: var(--cyan); margin-bottom: 8px;
+  }
+  #challenge-box p { font-size: 13px; color: #b8dced; line-height: 1.55; }
+  #challenge-box b { color: #fff; }
+  .challenge-hash {
+    margin-top: 10px; font-family: 'Consolas', monospace; font-weight: 700;
+    font-size: 19px; letter-spacing: 1px; color: var(--cyan);
+    text-shadow: 0 0 16px var(--cyan-dim);
+  }
+
+  .share-status {
+    font-family: monospace; font-size: 11.5px; letter-spacing: 0.5px;
+    text-align: center; line-height: 1.5; margin-top: 10px; min-height: 1em;
+    color: #7fb8cc;
+  }
+  .share-status.ok { color: var(--green); }
+  .app-btn { font-size: 14px; }
+  .app-btn.ig { border-color: rgba(225,48,108,0.55); color: #ff9ec4;
+                background: linear-gradient(180deg, rgba(225,48,108,0.16), transparent); }
+  .app-btn.tt { border-color: rgba(105,201,208,0.55); color: #9df0f4;
+                background: linear-gradient(180deg, rgba(105,201,208,0.16), transparent); }
+  #btn-save-card { font-size: 12.5px; }
+
+  .cta-box {
+    border: 1px solid rgba(255,179,71,0.4); border-radius: 8px;
+    background: linear-gradient(180deg, rgba(255,179,71,0.07), transparent);
+    padding: 18px 16px; margin-top: 18px;
+  }
+  .cta-box .sys-label { color: var(--orange); }
+  .cta-box p { font-size: 13.5px; color: #ffd9a8; line-height: 1.6; margin-bottom: 14px; }
+
+  footer { text-align: center; font-family: monospace; font-size: 10px; color: #33566b; padding-top: 24px; letter-spacing: 1px; line-height: 1.7; }
+
+  .hidden { display: none !important; }
+  #err-box {
+    font-family: monospace; font-size: 12px; color: var(--red);
+    border: 1px solid rgba(255,77,94,0.4); border-radius: 6px;
+    padding: 12px; margin: 12px 0; display: none; line-height: 1.6;
+  }
+  #warn-box {
+    font-family: monospace; font-size: 11.5px; color: var(--orange);
+    border: 1px solid rgba(255,179,71,0.4); border-radius: 6px;
+    padding: 10px 12px; margin: 12px 0; display: none; line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+<canvas id="bg-canvas"></canvas>
+
+<!-- KINA core: fills the viewport on the intro screen.
+     Swap in assets/kina-loop.mp4 to replace the procedural animation. -->
+<div id="kina-stage">
+  <video id="kina-loop" loop muted playsinline autoplay preload="auto"></video>
+  <canvas id="kina-core"></canvas>
+  <div id="kina-scanlines"></div>
+  <div id="kina-status"></div>
+</div>
+
+<div id="app">
+  <header>
+    <div class="logo">KINA<b>·</b>OS <span style="opacity:.5">//</span> POSTURE<b>.</b>SCAN</div>
+    <button id="mute-btn" aria-label="Toggle sound">SOUND: ON</button>
+  </header>
+
+  <!-- STEP 1 · KINA INTRO -->
+  <section class="panel active" id="panel-greet">
+    <!-- Captions and controls float over the full-screen animation;
+         the stage itself lives outside #app so it can fill the viewport. -->
+    <div id="intro-overlay">
+      <div id="vo-caption" aria-live="polite"></div>
+      <!-- Shown on iOS only: the hardware ringer switch mutes web audio
+           regardless of volume, and it is the usual cause of a silent scan. -->
+      <div id="ios-sound" class="hidden">🔈 Turn your volume up — KINA speaks</div>
+      <button class="btn" id="btn-begin">▶ Begin Briefing</button>
+      <button class="btn hidden" id="btn-start">◈ I'm Ready — Start Scan</button>
+      <button class="btn secondary hidden" id="btn-skip-vo">▸ Skip briefing</button>
+    </div>
+  </section>
+
+  <!-- STEP 2 · CAPTURE (reused for front + side) -->
+  <section class="panel" id="panel-capture">
+    <div class="hud-frame">
+      <div id="steps">
+        <div class="step-dot" id="dot-front">01 · FRONT</div>
+        <div class="step-dot" id="dot-side">02 · SIDE</div>
+        <div class="step-dot" id="dot-result">03 · RESULT</div>
+      </div>
+      <div class="sys-label" id="capture-label">▸ VIEW 01 · FRONTAL PLANE</div>
+      <h1 id="capture-title">Face me, <span class="accent">feet together</span></h1>
+      <div id="capture-hint" style="font-family:monospace;font-size:12px;color:#7fb8cc;line-height:1.6;margin-top:8px"></div>
+      <div id="err-box"></div>
+      <div id="warn-box"></div>
+      <div id="video-wrap" class="hidden">
+        <video id="cam-video" autoplay playsinline muted></video>
+        <div id="pose-guide"></div>
+        <div id="reticle"><u></u><i></i><i></i><i></i><i></i><b></b></div>
+        <div id="countdown">3</div>
+      </div>
+      <div class="btn-row" id="capture-choices">
+        <button class="btn" id="btn-camera">📷 Live Camera</button>
+        <button class="btn" id="btn-upload">🖼 Upload Photo</button>
+      </div>
+      <button class="btn hidden" id="btn-snap" style="margin-top:12px">◉ Capture in 5s</button>
+      <button class="btn secondary hidden" id="btn-cancel-cam">✕ Cancel — use upload instead</button>
+      <input type="file" id="file-input" accept="image/*" style="display:none">
+      <div class="thumbs">
+        <div class="thumb empty" id="thumb-front">FRONT — PENDING</div>
+        <div class="thumb empty" id="thumb-side">SIDE — PENDING</div>
+      </div>
+      <div class="privacy-note"><b>●</b> PROCESSED LOCALLY IN YOUR BROWSER — NOTHING IS UPLOADED</div>
+    </div>
+  </section>
+
+  <!-- STEP 3 · ANALYSIS -->
+  <section class="panel" id="panel-analyze">
+    <div class="hud-frame">
+      <div class="sys-label">▸ STEP 03 · BIOMECHANICAL ANALYSIS</div>
+      <div id="img-wrap"><canvas id="scan-canvas"></canvas></div>
+      <div id="scan-status">CALIBRATING SENSORS…</div>
+      <div id="metrics"></div>
+    </div>
+  </section>
+
+  <!-- STEP 4-6 · SCORE / SLIDER / SHARE / CTA -->
+  <section class="panel" id="panel-score">
+    <div class="hud-frame">
+      <div class="sys-label">▸ ANALYSIS COMPLETE · FINAL ASSESSMENT</div>
+      <div id="score-ring-wrap">
+        <svg id="score-ring" viewBox="0 0 200 200">
+          <circle class="ring-bg" cx="100" cy="100" r="86"></circle>
+          <circle class="ring-fg" id="ring-fg" cx="100" cy="100" r="86" stroke-dasharray="540.35" stroke-dashoffset="540.35"></circle>
+          <text id="score-num" x="100" y="108" text-anchor="middle">0</text>
+          <text id="score-outof" x="100" y="132" text-anchor="middle">/ 100</text>
+        </svg>
+      </div>
+      <div id="verdict" aria-live="polite"></div>
+      <div id="verdict-sub"></div>
+      <div id="subscores">
+        <div class="subscore"><div class="lbl">FRONT</div><div class="val" id="sub-front">–</div></div>
+        <div class="subscore"><div class="lbl">SIDE</div><div class="val" id="sub-side">–</div></div>
+      </div>
+
+      <div id="hunch-box" class="hidden">
+        <div class="sys-label">▸ HUNCHBACK RISK</div>
+        <div id="hunch-ring-wrap">
+          <svg id="hunch-ring" viewBox="0 0 200 200">
+            <circle class="ring-bg" cx="100" cy="100" r="86"></circle>
+            <circle class="ring-fg" id="hunch-fg" cx="100" cy="100" r="86" stroke-dasharray="540.35" stroke-dashoffset="540.35"></circle>
+            <text id="hunch-num" x="100" y="108" text-anchor="middle">0%</text>
+            <text id="hunch-outof" x="100" y="132" text-anchor="middle">RISK</text>
+          </svg>
+        </div>
+        <div id="hunch-label"></div>
+        <div id="hunch-note"></div>
+        <div id="hunch-explain"></div>
+        <div class="hunch-scale"><span>0% · STACKED</span><span>100% · FULL HUNCH</span></div>
+      </div>
+
+      <div id="metrics-final"></div>
+      <div class="measure-note">Risk score reflects how far your posture has already rolled forward
+        today — it is a screening indicator, not a medical prediction or diagnosis.<br>
+        Distances are estimated from your photo by the pose model, good to roughly a
+        quarter-inch.</div>
+
+      <div class="btn-row" style="margin-top:18px">
+        <button class="btn" id="btn-share">⧉ Copy Score Card</button>
+        <button class="btn secondary" id="btn-retry" style="margin-top:0">↺ Rescan</button>
+      </div>
+      <div id="challenge-box">
+        <div class="challenge-tag">📸 THE POSTURE CHALLENGE</div>
+        <p>Screenshot this screen and post it on your socials with
+          <b>#posturechallenge</b> — then tag whoever you think is worse than you.</p>
+        <div class="challenge-hash">#posturechallenge</div>
+      </div>
+      <div id="share-status" class="share-status" aria-live="polite"></div>
+      <div id="share-apps" class="hidden">
+        <div class="sys-label" style="margin-top:14px">▸ POST IT</div>
+        <div class="btn-row">
+          <button class="btn app-btn ig" id="btn-ig">Instagram</button>
+          <button class="btn app-btn tt" id="btn-tt" style="margin-top:0">TikTok</button>
+        </div>
+        <button class="btn secondary hidden" id="btn-save-card">⇩ Save the image instead</button>
+      </div>
+      <div class="cta-box">
+        <div class="sys-label">▸ RECOMMENDED PROTOCOL</div>
+        <p id="cta-text">Alignment is a daily habit — and it responds fast to the right routine. <b>KinaPT</b> builds you a personalised daily posture programme, designed by physiotherapists and powered by AI.</p>
+        <a class="btn cta" id="btn-kinapt" href="#" target="_blank" rel="noopener">⚡ Fix My Posture with KinaPT</a>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    POSTURE.SCAN is a wellness screening demo by KinaPT — not a medical device, diagnosis, or treatment.<br>
+    All analysis runs on your device. No images are stored or transmitted.
+  </footer>
+</div>
+
+<canvas id="share-canvas" width="1080" height="1350" style="display:none"></canvas>
+<script type="module" src="./app.js"></script>
+</body>
+</html>
